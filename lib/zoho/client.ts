@@ -5,6 +5,8 @@ class ZohoClient {
   private readonly clientId: string
   private readonly clientSecret: string
   private readonly refreshToken: string
+  private cachedToken: string | null = null
+  private tokenExpiresAt: number = 0
 
   constructor() {
     this.clientId = process.env.ZOHO_CLIENT_ID!
@@ -13,6 +15,11 @@ class ZohoClient {
   }
 
   private async getAccessToken(): Promise<string> {
+    // Reuse cached token until 60s before expiry — avoids re-fetching on every page
+    if (this.cachedToken && Date.now() < this.tokenExpiresAt - 60_000) {
+      return this.cachedToken
+    }
+
     const params = new URLSearchParams({
       grant_type: 'refresh_token',
       client_id: this.clientId,
@@ -25,11 +32,15 @@ class ZohoClient {
     })
 
     if (!res.ok) {
-      throw new Error(`Zoho token refresh failed: ${res.status} ${res.statusText}`)
+      const errorBody = await res.text()
+      throw new Error(`Zoho token refresh failed: ${res.status} ${res.statusText} — ${errorBody}`)
     }
 
     const json = await res.json() as Record<string, unknown>
-    return json.access_token as string
+    this.cachedToken = json.access_token as string
+    const expiresIn = (json.expires_in as number ?? 3600) * 1000
+    this.tokenExpiresAt = Date.now() + expiresIn
+    return this.cachedToken
   }
 
   async getRecords(module: string, params?: Record<string, string>): Promise<Record<string, unknown>[]> {
