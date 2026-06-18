@@ -3,6 +3,7 @@ import { syncClaims } from '../../../lib/sync/syncClaims'
 import { syncCallLogs } from '../../../lib/sync/syncCallLogs'
 import { syncEstimates } from '../../../lib/sync/syncEstimates'
 import { syncPayments } from '../../../lib/sync/syncPayments'
+import { syncStageHistory } from '../../../lib/sync/syncStageHistory'
 
 async function handleSync(req: NextRequest): Promise<NextResponse> {
   const authHeader = req.headers.get('Authorization')
@@ -32,13 +33,17 @@ async function handleSync(req: NextRequest): Promise<NextResponse> {
     console.log('\n[sync] syncPayments starting...')
     const paymentsResult = await syncPayments()
 
+    console.log('\n[sync] syncStageHistory starting...')
+    const stageHistoryResult = await syncStageHistory()
+
     return NextResponse.json({
       success: true,
       elapsed_ms: Date.now() - start,
-      claims:    { elapsed_ms: claimsElapsed },
-      call_logs: { elapsed_ms: callLogsElapsed },
-      estimates: estimatesResult,
-      payments:  paymentsResult,
+      claims:        { elapsed_ms: claimsElapsed },
+      call_logs:     { elapsed_ms: callLogsElapsed },
+      estimates:     estimatesResult,
+      payments:      paymentsResult,
+      stage_history: stageHistoryResult,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

@@ -79,6 +79,53 @@ class ZohoClient {
     const json = await res.json() as { data?: Record<string, unknown>[] }
     return json.data?.[0] ?? null
   }
+
+  async getRelatedRecords(
+    module: string,
+    id: string,
+    relatedList: string,
+  ): Promise<Record<string, unknown>[]> {
+    const token = await this.getAccessToken()
+    const url = `${ZOHO_API_BASE}/${module}/${id}/${relatedList}`
+
+    const res = await fetch(url, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+    })
+
+    if (res.status === 204) return []
+    if (!res.ok) {
+      const errorBody = await res.text()
+      throw new Error(
+        `Zoho getRelatedRecords(${module}, ${id}, ${relatedList}) failed: ${res.status} ${res.statusText} — ${errorBody}`,
+      )
+    }
+
+    const json = await res.json() as { data?: Record<string, unknown>[] }
+    return json.data ?? []
+  }
+
+  async getFieldPicklist(module: string, fieldApiName: string): Promise<Map<string, string>> {
+    const token = await this.getAccessToken()
+    const url = `${ZOHO_API_BASE}/settings/fields?module=${encodeURIComponent(module)}`
+
+    const res = await fetch(url, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+    })
+
+    if (!res.ok) {
+      const errorBody = await res.text()
+      throw new Error(
+        `Zoho getFieldPicklist(${module}, ${fieldApiName}) failed: ${res.status} ${res.statusText} — ${errorBody}`,
+      )
+    }
+
+    type PicklistEntry = { id: string; display_value: string }
+    type FieldDef = { api_name: string; pick_list_values?: PicklistEntry[] }
+    const json = await res.json() as { fields?: FieldDef[] }
+    const field = json.fields?.find((f) => f.api_name === fieldApiName)
+    const entries = field?.pick_list_values ?? []
+    return new Map(entries.map((p) => [p.id, p.display_value]))
+  }
 }
 
 export const zohoClient = new ZohoClient()
