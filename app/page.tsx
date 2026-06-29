@@ -32,7 +32,7 @@ function overdueThreshold(): string {
 async function fetchKpis() {
   const sb = getServerSupabase()
 
-  const [openRes, overdueRes, closedRes, openDatesRes] = await Promise.all([
+  const [openRes, overdueRes, closedEventsRes, openDatesRes] = await Promise.all([
     sb
       .from('claims')
       .select('*', { count: 'exact', head: true })
@@ -44,11 +44,13 @@ async function fetchKpis() {
       .in('claim_status', [...OPEN_STATUSES])
       .lt('modified_time', overdueThreshold()),
 
+    // Count claims that actually transitioned into a completion stage this month
     sb
-      .from('claims')
-      .select('*', { count: 'exact', head: true })
-      .in('claim_status', [...CLOSED_STATUSES])
-      .gte('modified_time', monthStart()),
+      .from('claim_events')
+      .select('claim_id')
+      .in('stage', ['Complete', 'Claim Denied'])
+      .gte('entered_at', monthStart())
+      .not('claim_id', 'is', null),
 
     sb
       .from('claims')
@@ -59,7 +61,10 @@ async function fetchKpis() {
 
   const open = openRes.count ?? 0
   const overdue = overdueRes.count ?? 0
-  const closedMonth = closedRes.count ?? 0
+  // Distinct claim IDs that closed this month (one claim can have multiple close events)
+  const closedMonth = new Set(
+    (closedEventsRes.data ?? []).map((r) => r.claim_id as string),
+  ).size
 
   let avgDaysOpen: number | null = null
   if (openDatesRes.data && openDatesRes.data.length > 0) {
@@ -81,10 +86,12 @@ async function fetchPipelineBreakdown(): Promise<{ ast: StageRow[]; ust: StageRo
 
   const [astRes, ustRes] = await Promise.all([
     sb.from('claims').select('stage').eq('claim_status', 'ast_open'),
+    // claim_status values for open UST: 'ust_open', 'ust_pre_tank' (confirmed from data)
     sb
       .from('claims')
       .select('stage')
-      .in('claim_status', ['ust_open', 'ust_pre_tank']),
+      .in('claim_status', ['ust_open', 'ust_pre_tank'])
+      .eq('tank_type', 'UST'),
   ])
 
   function toRows(data: { stage: string }[] | null): StageRow[] {
@@ -125,6 +132,7 @@ async function fetchBottlenecks(): Promise<Bottleneck[]> {
     }
 
     return Object.entries(agg)
+      .filter(([, vals]) => vals.length >= 5)
       .map(([stage, vals]) => ({
         stage,
         avgDays: Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10,
@@ -455,7 +463,7 @@ export default async function KpiSummaryPage() {
             No stage history data yet. Run sync to populate.
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
             {bottlenecks.map((b) => (
               <BottleneckCard key={b.stage} {...b} />
             ))}

@@ -78,9 +78,10 @@ export default function NavBar() {
         Claims Management
       </span>
 
-      {/* Right — clock */}
+      {/* Right — clock (suppressHydrationWarning: time always differs between SSR and client) */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
         <span
+          suppressHydrationWarning
           style={{
             color: 'var(--text-primary)',
             fontSize: 13,
@@ -91,7 +92,7 @@ export default function NavBar() {
         >
           {timeStr}
         </span>
-        <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>
+        <span suppressHydrationWarning style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>
           {dateStr}
         </span>
       </div>
