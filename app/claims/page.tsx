@@ -68,8 +68,7 @@ function formatDate(isoStr: string | null): string {
 }
 
 function formatCurrency(n: number | null): string {
-  if (n == null) return '—'
-  return n.toLocaleString('en-US', {
+  return (n ?? 0).toLocaleString('en-US', {
     style: 'currency',
     currency: 'USD',
     maximumFractionDigits: 0,
@@ -157,10 +156,10 @@ function ClaimRow({
           {stale && (
             <span
               style={{
-                width: 6,
-                height: 6,
+                width: 8,
+                height: 8,
                 borderRadius: '50%',
-                background: 'var(--accent-amber)',
+                background: '#E8A84A',
                 display: 'inline-block',
                 flexShrink: 0,
               }}
@@ -301,7 +300,7 @@ function FilterBar({
         type="text"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search FSN, name, city..."
+        placeholder="Search FSN, contact, owner, city..."
         style={{
           width: '100%',
           padding: '6px 10px',
@@ -362,6 +361,7 @@ function ClaimDetail({
   loading: boolean
 }) {
   const zohoUrl = `https://crm.zoho.com/crm/org884788391/tab/Deals/${claim.id}`
+  const bothFinancialNull = claim.total_claim_costs == null && claim.total_amount_paid == null
   const totalCosts = claim.total_claim_costs ?? 0
   const totalPaid = claim.total_amount_paid ?? 0
   const outstanding = totalCosts - totalPaid
@@ -523,8 +523,12 @@ function ClaimDetail({
           },
           {
             label: 'Outstanding',
-            value: formatCurrency(outstanding > 0 ? outstanding : 0),
-            color: outstanding > 0 ? 'var(--accent-red)' : 'var(--accent-green)',
+            value: bothFinancialNull ? '—' : formatCurrency(outstanding > 0 ? outstanding : 0),
+            color: bothFinancialNull
+              ? 'var(--text-tertiary)'
+              : outstanding > 0
+                ? 'var(--accent-red)'
+                : 'var(--accent-green)',
           },
         ].map(({ label, value, color }) => (
           <div
@@ -646,7 +650,9 @@ function ClaimDetail({
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
                       {formatDate(ev.entered_at)}
-                      {ev.days_in_stage != null ? ` · ${ev.days_in_stage}d` : ''}
+                      {ev.days_in_stage != null
+                        ? ` · ${ev.days_in_stage < 1 ? '<1d' : `${ev.days_in_stage}d`}`
+                        : ''}
                       {ev.modified_by_name ? ` · ${ev.modified_by_name}` : ''}
                     </div>
                   </div>
@@ -846,7 +852,10 @@ export default function ClaimsPage() {
       c.field_service_number?.toLowerCase().includes(s) ||
       c.deal_name?.toLowerCase().includes(s) ||
       c.city?.toLowerCase().includes(s) ||
-      c.contact_name?.toLowerCase().includes(s)
+      c.contact_name?.toLowerCase().includes(s) ||
+      c.owner_name?.toLowerCase().includes(s) ||
+      c.adjuster_name?.toLowerCase().includes(s) ||
+      c.account_name?.toLowerCase().includes(s)
     return matchesPipeline && matchesSearch
   })
 
