@@ -1,25 +1,28 @@
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  --bg-base:        #0D1F0F;
+  --bg-surface:     #152A17;
+  --bg-elevated:    #1C3520;
+  --bg-header:      #0A1A0C;
+  --accent-yellow:  #E8C84A;
+  --accent-green:   #4AE89A;
+  --accent-red:     #E85A4A;
+  --accent-amber:   #E8A84A;
+  --text-primary:   #FFFFFF;
+  --text-secondary: #8FA882;
+  --text-tertiary:  #5A7A5C;
+  --border:         #2A4A2C;
+  --border-bright:  #3A6A3C;
 }
 
 html,
 body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
-
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -35,8 +38,15 @@ a {
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
+/* Scrollbar — themed to dark green */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-base);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-bright);
+  border-radius: 3px;
 }
