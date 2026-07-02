@@ -3,6 +3,7 @@ import { syncClaims } from '../../../lib/sync/syncClaims'
 import { syncCallLogs } from '../../../lib/sync/syncCallLogs'
 import { syncEstimates } from '../../../lib/sync/syncEstimates'
 import { syncPayments } from '../../../lib/sync/syncPayments'
+import { syncInspections } from '../../../lib/sync/syncInspections'
 import { syncStageHistory } from '../../../lib/sync/syncStageHistory'
 
 async function handleSync(req: NextRequest): Promise<NextResponse> {
@@ -33,6 +34,9 @@ async function handleSync(req: NextRequest): Promise<NextResponse> {
     console.log('\n[sync] syncPayments starting...')
     const paymentsResult = await syncPayments()
 
+    console.log('\n[sync] syncInspections starting...')
+    const inspectionsResult = await syncInspections()
+
     console.log('\n[sync] syncStageHistory starting...')
     const stageHistoryResult = await syncStageHistory()
 
@@ -43,6 +47,7 @@ async function handleSync(req: NextRequest): Promise<NextResponse> {
       call_logs:     { elapsed_ms: callLogsElapsed },
       estimates:     estimatesResult,
       payments:      paymentsResult,
+      inspections:   inspectionsResult,
       stage_history: stageHistoryResult,
     })
   } catch (err) {
