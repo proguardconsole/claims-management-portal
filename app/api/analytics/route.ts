@@ -46,8 +46,9 @@ type SB = ReturnType<typeof getServerSupabase>
 
 // ── VIEW 1: dwell ──────────────────────────────────────────────────────────────
 // Per-stage median and p90 dwell times, using completed transitions only.
+// Optional pipelineFilter ('AST' | 'UST') restricts to that pipeline only.
 
-async function viewDwell(sb: SB) {
+async function viewDwell(sb: SB, pipelineFilter?: string) {
   const [eventsRes, claimsRes] = await Promise.all([
     sb
       .from('claim_events')
@@ -71,6 +72,7 @@ async function viewDwell(sb: SB) {
   const agg: Record<string, number[]> = {}
   for (const ev of eventsRes.data ?? []) {
     const pipeline = pipelineByClaimId[ev.claim_id] ?? 'Other'
+    if (pipelineFilter && pipeline !== pipelineFilter) continue
     const key = `${ev.stage ?? 'Unknown'}||${pipeline}`
     if (!agg[key]) agg[key] = []
     agg[key].push(ev.days_in_stage as number)
@@ -311,7 +313,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     let data: unknown
     switch (view) {
-      case 'dwell':      data = await viewDwell(sb);      break
+      case 'dwell': {
+        const pipelineFilter = req.nextUrl.searchParams.get('pipeline') ?? undefined
+        data = await viewDwell(sb, pipelineFilter)
+        break
+      }
       case 'volume':     data = await viewVolume(sb);     break
       case 'bottleneck': data = await viewBottleneck(sb); break
       case 'stale':      data = await viewStale(sb);      break
