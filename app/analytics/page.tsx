@@ -13,6 +13,9 @@ import {
   LineChart,
   Line,
   ReferenceLine,
+  PieChart,
+  Pie,
+  Cell,
 } from 'recharts'
 
 // ─── types ─────────────────────────────────────────────────────────────────────
@@ -62,6 +65,50 @@ type DwellDatum = {
   claim_count: number
 }
 
+type FinancialEstimate = {
+  pipeline: string
+  claims_with_estimates: number
+  total_estimated: number
+  avg_per_claim: number
+  total_contractor_costs: number
+  total_state_fees: number
+  total_adjuster_fees: number
+}
+
+type FinancialPayment = {
+  pipeline: string
+  claims_with_payments: number
+  total_paid: number
+}
+
+type FinancialTotals = {
+  total_estimated: number
+  total_paid: number
+  collection_rate_pct: number
+}
+
+type FinancialData = {
+  estimates: FinancialEstimate[]
+  payments: FinancialPayment[]
+  totals: FinancialTotals
+}
+
+type FinancialChartDatum = { pipeline: string; Estimated: number; Collected: number }
+
+type DenialTrendRow = {
+  month: string
+  total_closed: number
+  denied: number
+  denial_rate_pct: number
+}
+
+type DenialReason = {
+  claim_denied_reason: string
+  count: number
+}
+
+type GroupedReason = { label: string; count: number }
+
 // ─── constants ─────────────────────────────────────────────────────────────────
 
 const BUCKET_COLORS: Record<string, string> = {
@@ -71,6 +118,11 @@ const BUCKET_COLORS: Record<string, string> = {
   '60d+':   '#E84A4A',
 }
 const BUCKETS = ['14-21d', '21-30d', '30-60d', '60d+'] as const
+
+const DENIAL_COLORS = [
+  '#E84A4A', '#E87A3A', '#E8A53A', '#E8C84A',
+  '#4CAF82', '#2a78d6', '#9b59b6',
+]
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -167,6 +219,50 @@ function buildDwellChartData(rows: DwellRow[], filter: DwellFilter): DwellDatum[
     p90_days: r.p90_days,
     claim_count: r.claim_count,
   }))
+}
+
+function fmtDollar(n: number): string {
+  return `$${Math.round(n).toLocaleString('en-US')}`
+}
+
+function fmtK(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}m`
+  if (n >= 1_000) return `$${Math.round(n / 1_000)}k`
+  return `$${Math.round(n)}`
+}
+
+function formatDenialMonth(monthStr: string): string {
+  const [year, month] = monthStr.split('-')
+  const d = new Date(Date.UTC(parseInt(year), parseInt(month) - 1, 15))
+  const m = d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })
+  return `${m} '${year.slice(2)}`
+}
+
+function collectionRateColor(pct: number): string {
+  if (pct > 80) return '#4CAF82'
+  if (pct >= 50) return '#E8C84A'
+  return '#E84A4A'
+}
+
+function groupReasons(reasons: DenialReason[], max = 6): GroupedReason[] {
+  const mapped = reasons.map((r) => ({ label: r.claim_denied_reason, count: r.count }))
+  if (mapped.length <= max) return mapped
+  const top = mapped.slice(0, max)
+  const otherCount = mapped.slice(max).reduce((s, r) => s + r.count, 0)
+  return [...top, { label: 'Other', count: otherCount }]
+}
+
+function buildFinancialChartData(financial: FinancialData): FinancialChartDatum[] {
+  const paymentByPipeline: Record<string, number> = {}
+  for (const p of financial.payments) paymentByPipeline[p.pipeline] = p.total_paid
+  return financial.estimates
+    .filter((e) => e.pipeline === 'AST' || e.pipeline === 'UST')
+    .map((e) => ({
+      pipeline: e.pipeline,
+      Estimated: e.total_estimated,
+      Collected: paymentByPipeline[e.pipeline] ?? 0,
+    }))
+    .sort((a, b) => a.pipeline.localeCompare(b.pipeline))
 }
 
 // ─── skeleton ──────────────────────────────────────────────────────────────────
@@ -1131,6 +1227,405 @@ function DwellChart({
   )
 }
 
+// ─── financial exposure section ───────────────────────────────────────────────
+
+function FinancialTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean
+  payload?: Array<{ dataKey: string; value: number }>
+  label?: string
+}) {
+  if (!active || !payload?.length) return null
+  const estimated = payload.find((p) => p.dataKey === 'Estimated')?.value ?? 0
+  const collected = payload.find((p) => p.dataKey === 'Collected')?.value ?? 0
+  const rate = estimated > 0 ? ((collected / estimated) * 100).toFixed(1) : '0.0'
+  return (
+    <div
+      style={{
+        background: 'var(--bg-header)',
+        border: '1px solid var(--border)',
+        borderRadius: 4,
+        padding: '10px 14px',
+        fontSize: 12,
+      }}
+    >
+      <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>{label}</div>
+      <div style={{ color: 'var(--text-secondary)', marginBottom: 3 }}>
+        Estimated:{' '}
+        <span style={{ color: '#E8C84A', fontWeight: 500 }}>{fmtDollar(estimated)}</span>
+      </div>
+      <div style={{ color: 'var(--text-secondary)', marginBottom: 3 }}>
+        Collected:{' '}
+        <span style={{ color: '#4CAF82', fontWeight: 500 }}>{fmtDollar(collected)}</span>
+      </div>
+      <div style={{ color: 'var(--text-secondary)' }}>
+        Rate: <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{rate}%</span>
+      </div>
+    </div>
+  )
+}
+
+function FinancialExposureSection({ financial }: { financial: FinancialData }) {
+  const { totals, estimates } = financial
+  const chartData = buildFinancialChartData(financial)
+
+  const contractor = estimates.reduce((s, e) => s + e.total_contractor_costs, 0)
+  const stateFees  = estimates.reduce((s, e) => s + e.total_state_fees, 0)
+  const adjFees    = estimates.reduce((s, e) => s + e.total_adjuster_fees, 0)
+
+  return (
+    <div
+      style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '20px 24px',
+      }}
+    >
+      {/* Header */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
+          Financial exposure
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
+          Estimated liability vs. payments collected
+        </div>
+      </div>
+
+      {/* Stat tiles */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
+        {[
+          { label: 'Total estimated',  value: fmtDollar(totals.total_estimated), color: 'var(--text-primary)' },
+          { label: 'Total collected',  value: fmtDollar(totals.total_paid),      color: 'var(--text-primary)' },
+          { label: 'Collection rate',
+            value: `${totals.collection_rate_pct.toFixed(1)}%`,
+            color: collectionRateColor(totals.collection_rate_pct) },
+        ].map(({ label, value, color }) => (
+          <div
+            key={label}
+            style={{
+              flex: 1,
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border)',
+              borderRadius: 5,
+              padding: '14px 16px',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--text-tertiary)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                marginBottom: 6,
+              }}
+            >
+              {label}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, color }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Grouped bar chart */}
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart
+          data={chartData}
+          margin={{ top: 8, right: 16, left: 16, bottom: 4 }}
+          barGap={6}
+          barCategoryGap={40}
+        >
+          <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
+          <XAxis
+            dataKey="pipeline"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: 'var(--text-secondary)', fontSize: 12 }}
+          />
+          <YAxis
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }}
+            tickFormatter={(v: number) => fmtK(v)}
+          />
+          <Tooltip content={<FinancialTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+          <Bar dataKey="Estimated" fill="#E8C84A" radius={[3, 3, 0, 0]} barSize={28} name="Estimated" />
+          <Bar dataKey="Collected" fill="#4CAF82" radius={[3, 3, 0, 0]} barSize={28} name="Collected" />
+        </BarChart>
+      </ResponsiveContainer>
+
+      {/* Chart legend */}
+      <div style={{ display: 'flex', gap: 20, marginTop: 12, justifyContent: 'center' }}>
+        {[
+          { color: '#E8C84A', label: 'Estimated' },
+          { color: '#4CAF82', label: 'Collected' },
+        ].map(({ color, label }) => (
+          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div
+              style={{ width: 12, height: 12, borderRadius: 3, background: color, flexShrink: 0 }}
+            />
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Cost breakdown pills */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+        {[
+          { label: 'Contractor', value: contractor },
+          { label: 'State fees', value: stateFees },
+          { label: 'Adj. fees',  value: adjFees },
+        ].map(({ label, value }) => (
+          <div
+            key={label}
+            style={{
+              padding: '4px 10px',
+              borderRadius: 999,
+              background: 'rgba(232, 200, 74, 0.15)',
+              fontSize: 12,
+              color: '#E8C84A',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {label}: {fmtK(value)}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── denial rate section ───────────────────────────────────────────────────────
+
+function DenialTrendTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean
+  payload?: Array<{ payload: DenialTrendRow }>
+}) {
+  if (!active || !payload?.length) return null
+  const row = payload[0].payload
+  return (
+    <div
+      style={{
+        background: 'var(--bg-header)',
+        border: '1px solid var(--border)',
+        borderRadius: 4,
+        padding: '10px 14px',
+        fontSize: 12,
+      }}
+    >
+      <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
+        {formatDenialMonth(row.month)}
+      </div>
+      <div style={{ color: 'var(--text-secondary)', marginBottom: 3 }}>
+        Closed:{' '}
+        <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{row.total_closed}</span>
+      </div>
+      <div style={{ color: 'var(--text-secondary)', marginBottom: 3 }}>
+        Denied:{' '}
+        <span style={{ color: '#E84A4A', fontWeight: 500 }}>{row.denied}</span>
+      </div>
+      <div style={{ color: 'var(--text-secondary)' }}>
+        Rate:{' '}
+        <span style={{ color: '#E84A4A', fontWeight: 500 }}>
+          {row.denial_rate_pct.toFixed(1)}%
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function DenialPieTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean
+  payload?: Array<{ name: string; value: number }>
+}) {
+  if (!active || !payload?.length) return null
+  const entry = payload[0]
+  return (
+    <div
+      style={{
+        background: 'var(--bg-header)',
+        border: '1px solid var(--border)',
+        borderRadius: 4,
+        padding: '8px 12px',
+        fontSize: 12,
+      }}
+    >
+      <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+        {entry.name}
+      </div>
+      <div style={{ color: 'var(--text-secondary)' }}>
+        {entry.value} {entry.value === 1 ? 'denial' : 'denials'}
+      </div>
+    </div>
+  )
+}
+
+function DenialRateSection({
+  trend,
+  reasons,
+}: {
+  trend: DenialTrendRow[]
+  reasons: DenialReason[]
+}) {
+  const grouped = groupReasons(reasons)
+  const totalDenied = reasons.reduce((s, r) => s + r.count, 0)
+  const trendTicks = trend.filter((_, i) => i % 3 === 0).map((d) => d.month)
+
+  return (
+    <div
+      style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '20px 24px',
+      }}
+    >
+      {/* Header */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
+          Denial rate
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
+          Monthly denial rate and reason breakdown — last 18 months
+        </div>
+      </div>
+
+      {/* Two-column layout: 60/40 */}
+      <div style={{ display: 'flex', gap: 32, alignItems: 'flex-start' }}>
+
+        {/* LEFT: monthly trend line chart */}
+        <div style={{ flex: 3, minWidth: 0 }}>
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={trend} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
+              <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
+              <XAxis
+                dataKey="month"
+                ticks={trendTicks}
+                tickFormatter={formatDenialMonth}
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: 'var(--text-tertiary)', fontSize: 10 }}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }}
+                domain={[0, 100]}
+                tickFormatter={(v: number) => `${v}%`}
+                label={{
+                  value: '%',
+                  angle: -90,
+                  position: 'insideLeft',
+                  fill: 'var(--text-tertiary)',
+                  fontSize: 11,
+                  dx: 8,
+                }}
+              />
+              <Tooltip
+                content={<DenialTrendTooltip />}
+                cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1 }}
+              />
+              <Line
+                dataKey="denial_rate_pct"
+                stroke="#E84A4A"
+                strokeWidth={2}
+                dot={{ r: 3, fill: '#E84A4A', strokeWidth: 0 }}
+                activeDot={{ r: 4 }}
+                name="Denial rate"
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* RIGHT: donut + legend */}
+        <div style={{ flex: 2, minWidth: 0 }}>
+          {/* Donut with absolute-positioned center label */}
+          <div style={{ position: 'relative', height: 240 }}>
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie
+                  data={grouped}
+                  dataKey="count"
+                  nameKey="label"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={90}
+                  paddingAngle={2}
+                >
+                  {grouped.map((entry, i) => (
+                    <Cell key={entry.label} fill={DENIAL_COLORS[i % DENIAL_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip content={<DenialPieTooltip />} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                textAlign: 'center',
+                pointerEvents: 'none',
+              }}
+            >
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>
+                {totalDenied}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>denied</div>
+            </div>
+          </div>
+
+          {/* Slice legend */}
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {grouped.map((entry, i) => (
+              <div key={entry.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 2,
+                    background: DENIAL_COLORS[i % DENIAL_COLORS.length],
+                    flexShrink: 0,
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--text-secondary)',
+                    flex: 1,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {entry.label}
+                </span>
+                <span
+                  style={{ fontSize: 11, color: 'var(--text-primary)', fontWeight: 500, flexShrink: 0 }}
+                >
+                  {entry.count}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
 // ─── main page ─────────────────────────────────────────────────────────────────
 
 function ErrorCard({
@@ -1190,6 +1685,9 @@ export default function AnalyticsPage() {
   const [dwellRows, setDwellRows] = useState<DwellRow[]>([])
   const [dwellPipeline, setDwellPipeline] = useState<DwellFilter>('All')
   const [dwellLoading, setDwellLoading] = useState(false)
+  const [financialData, setFinancialData] = useState<FinancialData | null>(null)
+  const [denialTrend, setDenialTrend] = useState<DenialTrendRow[]>([])
+  const [denialReasons, setDenialReasons] = useState<DenialReason[]>([])
 
   // ── Fetchers ──────────────────────────────────────────────────────────────────
   const fetchOps = useCallback(async () => {
@@ -1224,9 +1722,11 @@ export default function AnalyticsPage() {
     setLeadError(null)
     try {
       const auth = `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`
-      const [vRes, dRes] = await Promise.all([
-        fetch('/api/analytics?view=volume', { headers: { Authorization: auth } }),
-        fetch('/api/analytics?view=dwell', { headers: { Authorization: auth } }),
+      const [vRes, dRes, fRes, denRes] = await Promise.all([
+        fetch('/api/analytics?view=volume',    { headers: { Authorization: auth } }),
+        fetch('/api/analytics?view=dwell',     { headers: { Authorization: auth } }),
+        fetch('/api/analytics?view=financial', { headers: { Authorization: auth } }),
+        fetch('/api/analytics?view=denials',   { headers: { Authorization: auth } }),
       ])
       if (!vRes.ok) {
         const body = await vRes.json().catch(() => ({}))
@@ -1236,11 +1736,24 @@ export default function AnalyticsPage() {
         const body = await dRes.json().catch(() => ({}))
         throw new Error(body.error ?? `Dwell request failed (${dRes.status})`)
       }
-      const [vData, dData] = await Promise.all([vRes.json(), dRes.json()])
+      if (!fRes.ok) {
+        const body = await fRes.json().catch(() => ({}))
+        throw new Error(body.error ?? `Financial request failed (${fRes.status})`)
+      }
+      if (!denRes.ok) {
+        const body = await denRes.json().catch(() => ({}))
+        throw new Error(body.error ?? `Denials request failed (${denRes.status})`)
+      }
+      const [vData, dData, fData, denData] = await Promise.all([
+        vRes.json(), dRes.json(), fRes.json(), denRes.json(),
+      ])
       setVolume(vData.data)
       const dwellData: DwellRow[] = dData.data ?? []
       setDwellAll(dwellData)
       setDwellRows(dwellData)
+      setFinancialData(fData.data ?? null)
+      setDenialTrend(denData.data?.trend ?? [])
+      setDenialReasons(denData.data?.reasons ?? [])
       setLeadFetched(true)
     } catch (err) {
       setLeadError(err instanceof Error ? err.message : 'Unknown error')
@@ -1369,6 +1882,10 @@ export default function AnalyticsPage() {
               onPipelineChange={handleDwellPipeline}
               loading={dwellLoading}
             />
+            {financialData && <FinancialExposureSection financial={financialData} />}
+            {denialTrend.length > 0 && (
+              <DenialRateSection trend={denialTrend} reasons={denialReasons} />
+            )}
           </div>
         )
       )}
