@@ -109,6 +109,16 @@ type DenialReason = {
 
 type GroupedReason = { label: string; count: number }
 
+type AgentRow = {
+  agent_name: string
+  total_open: number
+  stale_count: number
+  stale_pct: number
+  oldest_claim_days: number
+  ast_open: number
+  ust_open: number
+}
+
 // ─── constants ─────────────────────────────────────────────────────────────────
 
 const BUCKET_COLORS: Record<string, string> = {
@@ -1398,6 +1408,307 @@ function FinancialExposureSection({ financial }: { financial: FinancialData }) {
   )
 }
 
+// ─── agent workload section ───────────────────────────────────────────────────
+
+function stalePctColor(pct: number): string {
+  if (pct >= 50) return '#E84A4A'
+  if (pct >= 25) return '#E8A53A'
+  return 'var(--text-tertiary)'
+}
+
+function oldestColor(days: number): string {
+  if (days > 60) return '#E84A4A'
+  if (days >= 30) return '#E8A53A'
+  return 'var(--text-tertiary)'
+}
+
+function AgentWorkloadSection({ rows }: { rows: AgentRow[] }) {
+  const withStale = rows.filter((r) => r.stale_count > 0).length
+  const topAgent  = rows[0]
+
+  return (
+    <div
+      style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '20px 24px',
+      }}
+    >
+      {/* Header */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
+          Agent workload
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
+          Open claims by agent — sorted by stale count
+        </div>
+      </div>
+
+      {/* Stat tiles */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
+        {/* Active agents */}
+        <div
+          style={{
+            flex: 1,
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border)',
+            borderRadius: 5,
+            padding: '14px 16px',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: 'var(--text-tertiary)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              marginBottom: 6,
+            }}
+          >
+            Active agents
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)' }}>
+            {rows.length}
+          </div>
+        </div>
+
+        {/* With stale claims */}
+        <div
+          style={{
+            flex: 1,
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border)',
+            borderRadius: 5,
+            padding: '14px 16px',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: 'var(--text-tertiary)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              marginBottom: 6,
+            }}
+          >
+            With stale claims
+          </div>
+          <div
+            style={{
+              fontSize: 20,
+              fontWeight: 700,
+              color: withStale > 0 ? '#E8A53A' : 'var(--text-primary)',
+            }}
+          >
+            {withStale}
+          </div>
+        </div>
+
+        {/* Highest stale rate */}
+        <div
+          style={{
+            flex: 1,
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border)',
+            borderRadius: 5,
+            padding: '14px 16px',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: 'var(--text-tertiary)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              marginBottom: 6,
+            }}
+          >
+            Highest stale rate
+          </div>
+          {topAgent ? (
+            <>
+              <div
+                style={{
+                  fontSize: 20,
+                  fontWeight: 700,
+                  color: stalePctColor(topAgent.stale_pct),
+                }}
+              >
+                {topAgent.stale_pct}%
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 3 }}>
+                {topAgent.agent_name}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)' }}>—</div>
+          )}
+        </div>
+      </div>
+
+      {/* Table */}
+      {rows.length === 0 ? (
+        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '12px 0' }}>
+          No open claims currently assigned
+        </div>
+      ) : (
+        <>
+          <div style={{ overflowX: 'auto' }}>
+            <table
+              style={{
+                width: '100%',
+                borderCollapse: 'separate',
+                borderSpacing: '0 2px',
+              }}
+            >
+              <thead>
+                <tr>
+                  {['Agent', 'Open', 'Stale', 'Stale %', 'Oldest', 'AST', 'UST'].map((col) => (
+                    <th
+                      key={col}
+                      style={{
+                        textAlign: col === 'Agent' ? 'left' : 'right',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: '0.06em',
+                        color: 'var(--text-tertiary)',
+                        textTransform: 'uppercase',
+                        padding: '0 10px 8px',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => {
+                  const sColor = stalePctColor(row.stale_pct)
+                  const oColor = oldestColor(row.oldest_claim_days)
+                  const bg = i % 2 === 0 ? 'var(--bg-elevated)' : 'transparent'
+                  const cell = (extra?: React.CSSProperties): React.CSSProperties => ({
+                    padding: '9px 10px',
+                    background: bg,
+                    ...extra,
+                  })
+                  return (
+                    <tr key={row.agent_name}>
+                      <td
+                        style={cell({
+                          fontSize: 13,
+                          color: 'var(--text-primary)',
+                          fontWeight: 500,
+                          borderRadius: '4px 0 0 4px',
+                        })}
+                      >
+                        {row.agent_name}
+                      </td>
+                      <td
+                        style={cell({
+                          fontSize: 13,
+                          color: 'var(--text-primary)',
+                          fontWeight: 500,
+                          textAlign: 'right',
+                        })}
+                      >
+                        {row.total_open}
+                      </td>
+                      <td
+                        style={cell({
+                          fontSize: 13,
+                          color: row.stale_count > 0 ? '#E8A53A' : 'var(--text-tertiary)',
+                          textAlign: 'right',
+                        })}
+                      >
+                        {row.stale_count}
+                      </td>
+                      <td style={cell()}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'flex-end',
+                            gap: 6,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 48,
+                              height: 4,
+                              background: 'var(--bg-base)',
+                              borderRadius: 2,
+                              overflow: 'hidden',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <div
+                              style={{
+                                height: '100%',
+                                width: `${Math.min(row.stale_pct, 100)}%`,
+                                background: sColor,
+                                borderRadius: 2,
+                              }}
+                            />
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 12,
+                              color: sColor,
+                              fontWeight: 500,
+                              minWidth: 30,
+                              textAlign: 'right',
+                            }}
+                          >
+                            {row.stale_pct}%
+                          </span>
+                        </div>
+                      </td>
+                      <td
+                        style={cell({
+                          fontSize: 13,
+                          color: oColor,
+                          textAlign: 'right',
+                        })}
+                      >
+                        {Math.round(row.oldest_claim_days)}d
+                      </td>
+                      <td
+                        style={cell({
+                          fontSize: 13,
+                          color: 'var(--text-secondary)',
+                          textAlign: 'right',
+                        })}
+                      >
+                        {row.ast_open}
+                      </td>
+                      <td
+                        style={cell({
+                          fontSize: 13,
+                          color: 'var(--text-secondary)',
+                          textAlign: 'right',
+                          borderRadius: '0 4px 4px 0',
+                        })}
+                      >
+                        {row.ust_open}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 12 }}>
+            Stale threshold: 14 days without a stage change
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─── denial rate section ───────────────────────────────────────────────────────
 
 function DenialTrendTooltip({
@@ -1673,6 +1984,7 @@ export default function AnalyticsPage() {
   // ── Operations state ──────────────────────────────────────────────────────────
   const [bottleneck, setBottleneck] = useState<BottleneckRow[]>([])
   const [stale, setStale] = useState<StaleRow[]>([])
+  const [agentRows, setAgentRows] = useState<AgentRow[]>([])
   const [opsLoading, setOpsLoading] = useState(true)
   const [opsError, setOpsError] = useState<string | null>(null)
 
@@ -1695,9 +2007,10 @@ export default function AnalyticsPage() {
     setOpsError(null)
     try {
       const auth = `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`
-      const [bRes, sRes] = await Promise.all([
+      const [bRes, sRes, aRes] = await Promise.all([
         fetch('/api/analytics?view=bottleneck', { headers: { Authorization: auth } }),
-        fetch('/api/analytics?view=stale', { headers: { Authorization: auth } }),
+        fetch('/api/analytics?view=stale',      { headers: { Authorization: auth } }),
+        fetch('/api/analytics?view=agents',     { headers: { Authorization: auth } }),
       ])
       if (!bRes.ok) {
         const body = await bRes.json().catch(() => ({}))
@@ -1707,9 +2020,14 @@ export default function AnalyticsPage() {
         const body = await sRes.json().catch(() => ({}))
         throw new Error(body.error ?? `Stale request failed (${sRes.status})`)
       }
-      const [bData, sData] = await Promise.all([bRes.json(), sRes.json()])
+      if (!aRes.ok) {
+        const body = await aRes.json().catch(() => ({}))
+        throw new Error(body.error ?? `Agents request failed (${aRes.status})`)
+      }
+      const [bData, sData, aData] = await Promise.all([bRes.json(), sRes.json(), aRes.json()])
       setBottleneck(bData.data ?? [])
       setStale(sData.data ?? [])
+      setAgentRows(aData.data ?? [])
     } catch (err) {
       setOpsError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -1863,6 +2181,7 @@ export default function AnalyticsPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             <BottleneckHeatmap rows={bottleneck} />
             <StaleTriageChart rows={stale} />
+            <AgentWorkloadSection rows={agentRows} />
           </div>
         )
       )}
