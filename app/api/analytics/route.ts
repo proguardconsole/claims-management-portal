@@ -288,9 +288,245 @@ async function viewStale(sb: SB) {
   return rows
 }
 
+// ── VIEW 5: financial ──────────────────────────────────────────────────────────
+// Financial exposure overview: estimates and payments aggregated by pipeline.
+// estimates table uses estimate_total as the top-level amount; subtotals
+// (contractor_costs, state_fees, adjuster_fees) are also present and included.
+// claim_payments table uses the `amount` column.
+
+async function viewFinancial(sb: SB) {
+  const [estimatesRes, paymentsRes, claimsRes] = await Promise.all([
+    sb
+      .from('estimates')
+      .select('claim_id, estimate_total, contractor_costs, state_fees, adjuster_fees')
+      .not('claim_id', 'is', null),
+    sb
+      .from('claim_payments')
+      .select('claim_id, amount')
+      .not('claim_id', 'is', null),
+    sb
+      .from('claims')
+      .select('id, tank_type'),
+  ])
+
+  if (estimatesRes.error) throw new Error(estimatesRes.error.message)
+  if (paymentsRes.error) throw new Error(paymentsRes.error.message)
+  if (claimsRes.error) throw new Error(claimsRes.error.message)
+
+  const pipelineByClaimId: Record<string, string> = {}
+  for (const c of claimsRes.data ?? []) {
+    pipelineByClaimId[c.id] = normalizePipeline(c.tank_type)
+  }
+
+  // Estimates aggregation — one claim can have multiple estimates (one per FS record)
+  type EstAgg = {
+    claimsSet: Record<string, true>
+    total_estimated: number
+    total_contractor_costs: number
+    total_state_fees: number
+    total_adjuster_fees: number
+  }
+  const estAgg: Record<string, EstAgg> = {}
+
+  for (const e of estimatesRes.data ?? []) {
+    const pipeline = pipelineByClaimId[e.claim_id ?? ''] ?? 'Other'
+    if (!estAgg[pipeline]) {
+      estAgg[pipeline] = {
+        claimsSet: {},
+        total_estimated: 0,
+        total_contractor_costs: 0,
+        total_state_fees: 0,
+        total_adjuster_fees: 0,
+      }
+    }
+    if (e.claim_id) estAgg[pipeline].claimsSet[e.claim_id] = true
+    estAgg[pipeline].total_estimated      += (e.estimate_total     as number) ?? 0
+    estAgg[pipeline].total_contractor_costs += (e.contractor_costs as number) ?? 0
+    estAgg[pipeline].total_state_fees     += (e.state_fees         as number) ?? 0
+    estAgg[pipeline].total_adjuster_fees  += (e.adjuster_fees      as number) ?? 0
+  }
+
+  const estimates = Object.keys(estAgg).map((pipeline) => {
+    const a = estAgg[pipeline]
+    const claimsCount = Object.keys(a.claimsSet).length
+    return {
+      pipeline,
+      claims_with_estimates: claimsCount,
+      total_estimated: round1(a.total_estimated),
+      avg_per_claim: round1(claimsCount > 0 ? a.total_estimated / claimsCount : 0),
+      total_contractor_costs: round1(a.total_contractor_costs),
+      total_state_fees: round1(a.total_state_fees),
+      total_adjuster_fees: round1(a.total_adjuster_fees),
+    }
+  })
+
+  // Payments aggregation
+  type PmtAgg = { claimsSet: Record<string, true>; total_paid: number }
+  const pmtAgg: Record<string, PmtAgg> = {}
+
+  for (const p of paymentsRes.data ?? []) {
+    const pipeline = pipelineByClaimId[p.claim_id ?? ''] ?? 'Other'
+    if (!pmtAgg[pipeline]) pmtAgg[pipeline] = { claimsSet: {}, total_paid: 0 }
+    if (p.claim_id) pmtAgg[pipeline].claimsSet[p.claim_id] = true
+    pmtAgg[pipeline].total_paid += (p.amount as number) ?? 0
+  }
+
+  const payments = Object.keys(pmtAgg).map((pipeline) => ({
+    pipeline,
+    claims_with_payments: Object.keys(pmtAgg[pipeline].claimsSet).length,
+    total_paid: round1(pmtAgg[pipeline].total_paid),
+  }))
+
+  // Cross-pipeline totals
+  const total_estimated = estimates.reduce((s, r) => s + r.total_estimated, 0)
+  const total_paid      = payments.reduce((s, r) => s + r.total_paid, 0)
+  const collection_rate_pct =
+    total_estimated > 0 ? round1((total_paid / total_estimated) * 100) : 0
+
+  return {
+    estimates,
+    payments,
+    totals: {
+      total_estimated: round1(total_estimated),
+      total_paid:      round1(total_paid),
+      collection_rate_pct,
+    },
+  }
+}
+
+// ── VIEW 6: agents ─────────────────────────────────────────────────────────────
+// Agent workload board: open claims per owner with staleness metrics.
+
+async function viewAgents(sb: SB) {
+  const { data: claims, error } = await sb
+    .from('claims')
+    .select('owner_name, tank_type, modified_time')
+    .eq('record_type', 'Claim')
+    .not('stage', 'in', CLOSED_STAGES_TUPLE)
+    .not('modified_time', 'is', null)
+
+  if (error) throw new Error(error.message)
+
+  const now = Date.now()
+
+  type AgentAgg = {
+    total_open: number
+    stale_count: number
+    oldest_days: number
+    ast_open: number
+    ust_open: number
+  }
+  const agg: Record<string, AgentAgg> = {}
+
+  for (const claim of claims ?? []) {
+    const name = claim.owner_name?.trim()
+    if (!name) continue
+
+    const days = (now - new Date(claim.modified_time).getTime()) / MS_PER_DAY
+
+    if (!agg[name]) {
+      agg[name] = { total_open: 0, stale_count: 0, oldest_days: 0, ast_open: 0, ust_open: 0 }
+    }
+    agg[name].total_open++
+    if (days > 14) agg[name].stale_count++
+    if (days > agg[name].oldest_days) agg[name].oldest_days = days
+    if (claim.tank_type === 'AST') agg[name].ast_open++
+    if (claim.tank_type === 'UST') agg[name].ust_open++
+  }
+
+  const rows = Object.keys(agg).map((name) => {
+    const a = agg[name]
+    return {
+      agent_name: name,
+      total_open: a.total_open,
+      stale_count: a.stale_count,
+      stale_pct: Math.round((a.stale_count / a.total_open) * 100),
+      oldest_claim_days: round1(a.oldest_days),
+      ast_open: a.ast_open,
+      ust_open: a.ust_open,
+    }
+  })
+
+  rows.sort((a, b) => {
+    if (b.stale_count !== a.stale_count) return b.stale_count - a.stale_count
+    return b.total_open - a.total_open
+  })
+
+  return rows
+}
+
+// ── VIEW 7: denials ────────────────────────────────────────────────────────────
+// Denial rate trend (monthly, last 18 months) + all-time reason breakdown.
+// Uses modified_time for monthly bucketing — reflects when the claim was denied,
+// not when it was first reported (created_time).
+// claim_denied is a boolean written by syncClaims as (Claim_Denied === true).
+// Fallback: stage = 'Claim Denied' also counts as denied.
+
+async function viewDenials(sb: SB) {
+  const cutoff = new Date()
+  cutoff.setMonth(cutoff.getMonth() - 18)
+
+  const [closedRes, reasonsRes] = await Promise.all([
+    sb
+      .from('claims')
+      .select('stage, claim_denied, modified_time')
+      .eq('record_type', 'Claim')
+      .in('stage', CLOSED_STAGES_ARRAY)
+      .gte('modified_time', cutoff.toISOString())
+      .not('modified_time', 'is', null),
+    sb
+      .from('claims')
+      .select('claim_denied_reason')
+      .eq('claim_denied', true)
+      .not('claim_denied_reason', 'is', null),
+  ])
+
+  if (closedRes.error) throw new Error(closedRes.error.message)
+  if (reasonsRes.error) throw new Error(reasonsRes.error.message)
+
+  // Monthly trend
+  const monthAgg: Record<string, { total_closed: number; denied: number }> = {}
+  for (const claim of closedRes.data ?? []) {
+    const month = (claim.modified_time as string).slice(0, 7) // YYYY-MM
+    if (!monthAgg[month]) monthAgg[month] = { total_closed: 0, denied: 0 }
+    monthAgg[month].total_closed++
+    if (claim.claim_denied === true || claim.stage === 'Claim Denied') {
+      monthAgg[month].denied++
+    }
+  }
+
+  const trend = Object.keys(monthAgg)
+    .sort()
+    .map((month) => {
+      const { total_closed, denied } = monthAgg[month]
+      return {
+        month,
+        total_closed,
+        denied,
+        denial_rate_pct:
+          total_closed > 0 ? round1((denied / total_closed) * 100) : 0,
+      }
+    })
+
+  // All-time reason breakdown (aggregate in JS to avoid GROUP BY limitations)
+  const reasonAgg: Record<string, number> = {}
+  for (const r of reasonsRes.data ?? []) {
+    const reason = r.claim_denied_reason as string
+    reasonAgg[reason] = (reasonAgg[reason] ?? 0) + 1
+  }
+
+  const reasons = Object.keys(reasonAgg)
+    .map((reason) => ({ claim_denied_reason: reason, count: reasonAgg[reason] }))
+    .sort((a, b) => b.count - a.count)
+
+  return { trend, reasons }
+}
+
 // ── route handler ──────────────────────────────────────────────────────────────
 
-const VALID_VIEWS = ['dwell', 'volume', 'bottleneck', 'stale'] as const
+const VALID_VIEWS = [
+  'dwell', 'volume', 'bottleneck', 'stale', 'financial', 'agents', 'denials',
+] as const
 type View = (typeof VALID_VIEWS)[number]
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -321,6 +557,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       case 'volume':     data = await viewVolume(sb);     break
       case 'bottleneck': data = await viewBottleneck(sb); break
       case 'stale':      data = await viewStale(sb);      break
+      case 'financial':  data = await viewFinancial(sb);  break
+      case 'agents':     data = await viewAgents(sb);     break
+      case 'denials':    data = await viewDenials(sb);    break
     }
     return NextResponse.json({ view, data })
   } catch (err) {
