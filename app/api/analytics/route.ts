@@ -469,7 +469,7 @@ async function viewDenials(sb: SB) {
   const [closedRes, reasonsRes] = await Promise.all([
     sb
       .from('claims')
-      .select('stage, claim_denied, modified_time')
+      .select('stage, modified_time')
       .eq('record_type', 'Claim')
       .in('stage', CLOSED_STAGES_ARRAY)
       .gte('modified_time', cutoff.toISOString())
@@ -477,7 +477,7 @@ async function viewDenials(sb: SB) {
     sb
       .from('claims')
       .select('claim_denied_reason')
-      .eq('claim_denied', true)
+      .eq('stage', 'Claim Denied')
       .not('claim_denied_reason', 'is', null),
   ])
 
@@ -490,7 +490,7 @@ async function viewDenials(sb: SB) {
     const month = (claim.modified_time as string).slice(0, 7) // YYYY-MM
     if (!monthAgg[month]) monthAgg[month] = { total_closed: 0, denied: 0 }
     monthAgg[month].total_closed++
-    if (claim.claim_denied === true || claim.stage === 'Claim Denied') {
+    if (claim.stage === 'Claim Denied') {
       monthAgg[month].denied++
     }
   }
