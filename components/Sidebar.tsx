@@ -7,17 +7,17 @@ import {
   FileText,
   ClipboardCheck,
   Phone,
-  BarChart2,
+  TrendingUp,
   Archive,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
-  { label: 'KPI Summary',    href: '/',             icon: LayoutDashboard },
-  { label: 'Open Claims',    href: '/claims',        icon: FileText        },
-  { label: 'Inspections',   href: '/inspections',   icon: ClipboardCheck  },
-  { label: 'Call Logs',      href: '/call-logs',     icon: Phone           },
-  { label: 'Analytics',      href: '/analytics',     icon: BarChart2       },
-  { label: 'Closed / Denied', href: '/closed',      icon: Archive         },
+  { label: 'KPI Summary',     href: '/',            icon: LayoutDashboard },
+  { label: 'Open Claims',     href: '/claims',       icon: FileText        },
+  { label: 'Analytics',       href: '/analytics',    icon: TrendingUp      },
+  { label: 'Inspections',     href: '/inspections',  icon: ClipboardCheck  },
+  { label: 'Call Logs',       href: '/call-logs',    icon: Phone           },
+  { label: 'Closed / Denied', href: '/closed',       icon: Archive         },
 ]
 
 interface SidebarProps {
