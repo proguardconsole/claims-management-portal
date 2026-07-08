@@ -9,6 +9,7 @@ import {
   Phone,
   TrendingUp,
   Archive,
+  FileBarChart,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { label: 'Inspections',     href: '/inspections',  icon: ClipboardCheck  },
   { label: 'Call Logs',       href: '/call-logs',    icon: Phone           },
   { label: 'Closed / Denied', href: '/closed',       icon: Archive         },
+  { label: 'Weekly Digest',   href: '/digest',       icon: FileBarChart    },
 ]
 
 interface SidebarProps {
