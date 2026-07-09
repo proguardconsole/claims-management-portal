@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
 
 const OPEN_STATUSES = ['ast_open', 'ust_open', 'ust_pre_tank'] as const
 
-export async function GET(req: NextRequest): Promise<NextResponse> {
+export async function GET(): Promise<NextResponse> {
   const sb = getServerSupabase()
 
   const { data, error } = await sb

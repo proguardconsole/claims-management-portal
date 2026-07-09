@@ -3,7 +3,6 @@ import { getServerSupabase } from '../lib/supabase/server'
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 const OPEN_STATUSES = ['ast_open', 'ust_open', 'ust_pre_tank'] as const
-const CLOSED_STATUSES = ['ast_completed', 'ust_closed'] as const
 
 function daysAgo(isoStr: string): number {
   const ms = Date.now() - new Date(isoStr).getTime()
