@@ -39,11 +39,17 @@ type StageEvent = {
 }
 
 type CallLog = {
+  id: string
   direction: string | null
   call_time: string | null
   duration_seconds: number | null
   phone_number: string | null
   agent_name: string | null
+  call_answered: boolean | null
+  inferred_summary: string | null
+  inferred_sentiment: string | null
+  inferred_risk_flags: string[] | null
+  inferred_topics: string[] | null
 }
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
@@ -709,53 +715,129 @@ function ClaimDetail({
             No call history found
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            {calls.map((call, i) => (
-              <div
-                key={i}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}
-              >
-                <Phone
-                  size={11}
-                  style={{
-                    color:
-                      call.direction === 'inbound'
-                        ? 'var(--accent-green)'
-                        : 'var(--accent-yellow)',
-                    flexShrink: 0,
-                  }}
-                />
-                <span
-                  style={{
-                    color: 'var(--text-secondary)',
-                    textTransform: 'capitalize',
-                    minWidth: 52,
-                  }}
-                >
-                  {call.direction}
-                </span>
-                <span style={{ color: 'var(--text-primary)' }}>
-                  {formatDate(call.call_time)}
-                </span>
-                <span style={{ color: 'var(--text-tertiary)' }}>·</span>
-                <span
-                  style={{
-                    color: 'var(--text-secondary)',
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  {formatDuration(call.duration_seconds)}
-                </span>
-                {call.agent_name && (
-                  <>
-                    <span style={{ color: 'var(--text-tertiary)' }}>·</span>
-                    <span style={{ color: 'var(--text-tertiary)' }}>
-                      {call.agent_name}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {calls.map((call, i) => {
+              const sentColor = (() => {
+                if (!call.inferred_sentiment) return 'rgba(255,255,255,0.3)'
+                const s = call.inferred_sentiment.toLowerCase()
+                if (s.includes('positive')) return '#4CAF82'
+                if (s.includes('negative') || s.includes('frustrated')) return '#E84A4A'
+                return 'rgba(255,255,255,0.3)'
+              })()
+              const hasRisk = (call.inferred_risk_flags?.length ?? 0) > 0
+              const hasTopics = (call.inferred_topics?.length ?? 0) > 0
+
+              return (
+                <div key={call.id ?? i} style={{ display: 'flex', flexDirection: 'column' }}>
+                  {/* meta line — unchanged */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                    <Phone
+                      size={11}
+                      style={{
+                        color:
+                          call.direction === 'inbound'
+                            ? 'var(--accent-green)'
+                            : 'var(--accent-yellow)',
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span
+                      style={{
+                        color: 'var(--text-secondary)',
+                        textTransform: 'capitalize',
+                        minWidth: 52,
+                      }}
+                    >
+                      {call.direction}
                     </span>
-                  </>
-                )}
-              </div>
-            ))}
+                    <span style={{ color: 'var(--text-primary)' }}>
+                      {formatDate(call.call_time)}
+                    </span>
+                    <span style={{ color: 'var(--text-tertiary)' }}>·</span>
+                    <span
+                      style={{
+                        color: 'var(--text-secondary)',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      {formatDuration(call.duration_seconds)}
+                    </span>
+                    {call.agent_name && (
+                      <>
+                        <span style={{ color: 'var(--text-tertiary)' }}>·</span>
+                        <span style={{ color: 'var(--text-tertiary)' }}>
+                          {call.agent_name}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* summary */}
+                  {call.inferred_summary && (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--text-secondary)',
+                        fontStyle: 'italic',
+                        marginTop: 4,
+                      }}
+                    >
+                      {call.inferred_summary.length > 100
+                        ? call.inferred_summary.slice(0, 100) + '…'
+                        : call.inferred_summary}
+                    </div>
+                  )}
+
+                  {/* sentiment dot + risk flag */}
+                  {(call.inferred_sentiment || hasRisk) && (
+                    <div style={{ display: 'flex', alignItems: 'center', marginTop: 4 }}>
+                      <div
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: sentColor,
+                          display: 'inline-block',
+                          marginRight: 6,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                        {call.inferred_sentiment ?? 'Neutral'}
+                      </span>
+                      {hasRisk && (
+                        <span
+                          title={(call.inferred_risk_flags ?? []).join(', ')}
+                          style={{ color: '#E84A4A', fontSize: 12, marginLeft: 6 }}
+                        >
+                          ⚠
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* topics */}
+                  {hasTopics && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                      {(call.inferred_topics ?? []).map((t) => (
+                        <span
+                          key={t}
+                          style={{
+                            background: 'rgba(232,200,74,0.12)',
+                            color: '#E8C84A',
+                            fontSize: 10,
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                          }}
+                        >
+                          {t.replace(/_/g, ' ')}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
