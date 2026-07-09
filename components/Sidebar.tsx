@@ -44,7 +44,9 @@ export default function Sidebar({ lastSynced }: SidebarProps) {
     if (diffMins < 60) return `${diffMins}m ago`
     const diffHrs = Math.floor(diffMins / 60)
     if (diffHrs < 24) return `${diffHrs}h ago`
-    return d.toLocaleDateString()
+    const date = d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })
+    const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    return `${date} ${time}`
   }
 
   return (

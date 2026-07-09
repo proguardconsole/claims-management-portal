@@ -8,6 +8,8 @@ import { getServerSupabase } from '../lib/supabase/server'
 
 const inter = Inter({ subsets: ['latin'] })
 
+export const revalidate = 0
+
 export const metadata: Metadata = {
   title: 'ProGuard Claims Management',
   description: 'Internal claims management dashboard',

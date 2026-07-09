@@ -6,14 +6,7 @@ import { syncPayments } from '../../../lib/sync/syncPayments'
 import { syncInspections } from '../../../lib/sync/syncInspections'
 import { syncStageHistory } from '../../../lib/sync/syncStageHistory'
 
-async function handleSync(req: NextRequest): Promise<NextResponse> {
-  const authHeader = req.headers.get('Authorization')
-  const expected = `Bearer ${process.env.CRON_SECRET}`
-
-  if (!authHeader || authHeader !== expected) {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  }
-
+async function runSync(): Promise<NextResponse> {
   const start = Date.now()
 
   try {
@@ -56,12 +49,31 @@ async function handleSync(req: NextRequest): Promise<NextResponse> {
   }
 }
 
-// GET — called by Vercel cron scheduler
+// GET — called by Vercel cron scheduler.
+// Accepts either a valid CRON_SECRET bearer token (manual trigger)
+// or the x-vercel-cron: 1 header that Vercel injects on Hobby plan.
 export async function GET(req: NextRequest) {
-  return handleSync(req)
+  const authHeader = req.headers.get('authorization')
+  const cronHeader = req.headers.get('x-vercel-cron')
+  const token = authHeader?.replace('Bearer ', '').trim()
+  const validManual = token === process.env.CRON_SECRET
+  const validCron = cronHeader === '1'
+
+  if (!validManual && !validCron) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  return runSync()
 }
 
-// POST — for manual triggering
+// POST — for manual triggering, requires CRON_SECRET bearer token.
 export async function POST(req: NextRequest) {
-  return handleSync(req)
+  const authHeader = req.headers.get('Authorization')
+  const expected = `Bearer ${process.env.CRON_SECRET}`
+
+  if (!authHeader || authHeader !== expected) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+  }
+
+  return runSync()
 }
