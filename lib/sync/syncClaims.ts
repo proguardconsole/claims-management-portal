@@ -24,24 +24,40 @@ function str(val: unknown): string | null {
   return typeof val === 'string' ? val : null
 }
 
+function cleanStage(val: unknown): string {
+  const s = typeof val === 'string' ? val : ''
+  // Strip "75:" or "100:" style prefixes Zoho adds
+  return s.replace(/^\d+:\s*/, '').trim()
+}
+
 function computeClaimStatus(record: ZohoRecord): string {
-  const stage = str(record.Stage) ?? ''
+  const stage = cleanStage(record.Stage)
   const tankType = str(record.Tank_Type)
   const recordType = str(record.Type)
   const proceedToRemediation = str(record.Proceed_to_Remediation)
 
-  // Inspections are a separate record type — not traditional claims
-  if (recordType === 'Inspection' || (!tankType && recordType !== 'Claim')) {
+  // Fallback: infer tank type from Pipeline field name
+  // when Zoho doesn't return Tank_Type via API
+  const pipeline = str(record.Pipeline) ?? ''
+  const inferredTankType = tankType
+    ?? (pipeline.toUpperCase().includes('AST') ? 'AST'
+      : pipeline.toUpperCase().includes('UST') ? 'UST'
+      : null)
+
+  // Only treat as inspection if explicitly typed as Inspection, or if we have
+  // no tank type and it's explicitly typed as something other than Claim.
+  // Records with null recordType and null tankType fall through to 'unknown'.
+  if (recordType === 'Inspection' || (!inferredTankType && recordType !== 'Claim' && recordType !== null)) {
     return 'inspection'
   }
 
-  if (tankType === 'AST') {
+  if (inferredTankType === 'AST') {
     if (stage === 'Complete') return 'ast_completed'
     if (stage === 'Claim Denied') return 'ast_denied'
     return 'ast_open'
   }
 
-  if (tankType === 'UST') {
+  if (inferredTankType === 'UST') {
     if (stage === 'Complete') return 'ust_closed'
     if (stage === 'Claim Denied') return 'ust_closed'
     const preTankStages = ['Needs Analysis', 'Service Fee Billed', 'Attendance Deployed']
@@ -60,8 +76,11 @@ function mapRecord(record: ZohoRecord, syncedAt: string) {
     id,
     field_service_number: str(record.Field_Service_Number),
     deal_name: str(record.Deal_Name),
-    stage: str(record.Stage),
-    tank_type: str(record.Tank_Type),
+    stage: cleanStage(record.Stage),
+    tank_type: str(record.Tank_Type)
+      ?? (str(record.Pipeline)?.toUpperCase().includes('AST') ? 'AST'
+        : str(record.Pipeline)?.toUpperCase().includes('UST') ? 'UST'
+        : null),
     claim_trigger: str(record.Claim_Trigger),
     claim_state: str(record.Claim_State),
     proceed_to_remediation: str(record.Proceed_to_Remediation),
@@ -87,7 +106,7 @@ function mapRecord(record: ZohoRecord, syncedAt: string) {
     total_claim_costs: typeof record.Total_Claim_Costs === 'number' ? record.Total_Claim_Costs : null,
     deductible_paid: typeof record.Deductible_Paid === 'boolean' ? record.Deductible_Paid : null,
     service_fee_paid: typeof record.Service_Fee_Paid === 'boolean' ? record.Service_Fee_Paid : null,
-    record_type: str(record.Type),
+    record_type: str(record.Type) ?? 'Claim',
     claim_denied: record.Claim_Denied === true,
     adjuster_name: nested(record.Claims_Adjuster, 'name'),
     adjuster_id: nested(record.Claims_Adjuster, 'id'),
