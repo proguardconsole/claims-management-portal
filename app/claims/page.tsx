@@ -129,6 +129,7 @@ function ClaimRow({
 
   return (
     <div
+      id={`claim-row-${claim.id}`}
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -801,6 +802,7 @@ function ClaimDetail({
 
 export default function ClaimsPage() {
   const searchParams = useSearchParams()
+  const claimParam = searchParams.get('claim')
   const [allClaims, setAllClaims] = useState<Claim[]>([])
   const [loadingList, setLoadingList] = useState(true)
   const [pipeline, setPipeline] = useState<'all' | 'AST' | 'UST'>('all')
@@ -824,15 +826,22 @@ export default function ClaimsPage() {
 
   // Deep-link: ?claim=FS1872 auto-selects the matching claim
   useEffect(() => {
-    const claimParam = searchParams.get('claim')
     if (!claimParam || allClaims.length === 0) return
-    const found = allClaims.find(
+    const match = allClaims.find(
       (c) =>
         c.field_service_number === claimParam ||
         c.deal_name?.includes(claimParam),
     )
-    if (found) setSelectedClaim(found)
-  }, [allClaims, searchParams])
+    if (match) {
+      setSelectedClaim(match)
+      setTimeout(() => {
+        document.getElementById(`claim-row-${match.id}`)?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        })
+      }, 100)
+    }
+  }, [claimParam, allClaims])
 
   // Fetch stage history + calls when selected claim changes
   useEffect(() => {

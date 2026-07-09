@@ -214,107 +214,142 @@ function ExpandedRow({
   onToggleTranscript: () => void
 }) {
   const hasRisk = (call.inferred_risk_flags?.length ?? 0) > 0
-  const hasTopics = (call.inferred_topics?.length ?? 0) > 0
+  const topics = call.inferred_topics ?? []
 
   return (
     <tr>
       <td
         colSpan={colSpan}
         style={{
-          padding: '0 16px 16px 44px',
-          background: 'var(--bg-elevated)',
+          padding: 0,
+          borderLeft: '3px solid #E8C84A',
           borderBottom: '1px solid var(--border)',
+          background: 'var(--bg-elevated)',
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 4 }}>
-          {call.inferred_summary && (
-            <div>
-              <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginRight: 8 }}>
-                Summary
-              </span>
-              <span style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5 }}>
-                {call.inferred_summary}
-              </span>
-            </div>
-          )}
-
-          {hasTopics && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>Topics</span>
-              {(call.inferred_topics ?? []).map((t) => <TopicPill key={t} label={t} />)}
-            </div>
-          )}
-
-          {hasRisk && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#E84A4A' }}>
-                ⚠ Risk flags
-              </span>
-              {(call.inferred_risk_flags ?? []).map((f) => (
-                <span
-                  key={f}
-                  style={{
-                    fontSize: 10,
-                    padding: '2px 6px',
-                    borderRadius: 4,
-                    background: 'rgba(232,74,74,0.12)',
-                    color: '#E84A4A',
-                    fontWeight: 500,
-                  }}
-                >
-                  {f}
-                </span>
-              ))}
-            </div>
-          )}
-
-          {call.transcript && (
-            <div>
-              <button
-                onClick={onToggleTranscript}
-                style={{
-                  fontSize: 12,
-                  color: 'var(--text-secondary)',
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: 0,
-                  textDecoration: 'underline',
-                }}
-              >
-                {showTranscript ? 'Hide transcript ▴' : 'View transcript ▾'}
-              </button>
-              {showTranscript && (
-                <div
-                  style={{
-                    marginTop: 8,
-                    maxHeight: 200,
-                    overflowY: 'auto',
-                    padding: '10px 12px',
-                    background: 'var(--bg-base)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 4,
-                    fontSize: 12,
-                    fontFamily: 'monospace',
-                    color: 'var(--text-secondary)',
-                    lineHeight: 1.6,
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  {call.transcript}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '60% 40%',
+            padding: '16px 20px 16px 28px',
+          }}
+        >
+          {/* LEFT — summary, risk, transcript */}
+          <div style={{ paddingRight: 24 }}>
+            {call.inferred_summary && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 6 }}>
+                  Summary
                 </div>
-              )}
-            </div>
-          )}
+                <div style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.6 }}>
+                  {call.inferred_summary}
+                </div>
+              </div>
+            )}
 
-          {call.recording_url && (
-            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-              Recording:{' '}
-              <span style={{ fontFamily: 'monospace', color: 'var(--text-secondary)' }}>
-                {call.recording_url}
-              </span>
-            </div>
-          )}
+            {hasRisk && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#E84A4A', marginBottom: 4 }}>
+                  ⚠ Risk flags
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {(call.inferred_risk_flags ?? []).map((f) => (
+                    <span
+                      key={f}
+                      style={{
+                        fontSize: 10,
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        background: 'rgba(232,74,74,0.15)',
+                        color: '#E84A4A',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {f}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {call.transcript && (
+              <div style={{ marginTop: 12 }}>
+                <button
+                  onClick={onToggleTranscript}
+                  style={{
+                    fontSize: 11,
+                    color: '#E8C84A',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 0,
+                    textDecoration: 'underline',
+                  }}
+                >
+                  {showTranscript ? 'Transcript ▴' : 'Transcript ▾'}
+                </button>
+                {showTranscript && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      maxHeight: 180,
+                      overflowY: 'auto',
+                      padding: '10px 12px',
+                      background: 'rgba(0,0,0,0.2)',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      lineHeight: 1.6,
+                      color: 'var(--text-secondary)',
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {call.transcript}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT — topics, recording */}
+          <div>
+            {topics.length > 0 && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 8 }}>
+                  Topics
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {topics.map((t) => (
+                    <span
+                      key={t}
+                      style={{
+                        display: 'inline-block',
+                        fontSize: 10,
+                        fontWeight: 500,
+                        padding: '3px 8px',
+                        borderRadius: 4,
+                        background: 'rgba(232,200,74,0.12)',
+                        color: '#E8C84A',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {toTitleCase(t)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {call.recording_url && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 4 }}>
+                  Recording
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                  {call.recording_url}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </td>
     </tr>
@@ -391,6 +426,16 @@ export default function CallLogsPage() {
       for (const t of call.inferred_topics ?? []) seen[t] = true
     }
     return Object.keys(seen).sort()
+  }, [calls])
+
+  const topicCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const call of calls) {
+      for (const t of call.inferred_topics ?? []) {
+        counts[t] = (counts[t] ?? 0) + 1
+      }
+    }
+    return counts
   }, [calls])
 
   const filteredCalls = useMemo(() => {
@@ -625,14 +670,17 @@ export default function CallLogsPage() {
             <button
               onClick={() => setTopicOpen((p) => !p)}
               style={{
-                padding: '6px 14px',
+                padding: '6px 12px',
                 fontSize: 12,
                 fontWeight: 500,
-                background: topicFilter.length > 0 ? 'var(--bg-elevated)' : 'var(--bg-surface)',
-                color: 'var(--text-primary)',
-                border: `1px solid ${topicFilter.length > 0 ? 'var(--border-bright)' : 'var(--border)'}`,
-                borderRadius: 4,
+                background: topicFilter.length > 0 ? 'rgba(232,200,74,0.1)' : 'var(--bg-elevated)',
+                color: topicFilter.length > 0 ? '#E8C84A' : 'white',
+                border: `1px solid ${topicFilter.length > 0 ? '#E8C84A' : 'var(--border-bright)'}`,
+                borderRadius: 8,
                 cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
               }}
             >
               {topicFilter.length > 0 ? `Topics (${topicFilter.length}) ▾` : 'Topics ▾'}
@@ -645,19 +693,30 @@ export default function CallLogsPage() {
                   top: '100%',
                   right: 0,
                   marginTop: 4,
-                  background: 'var(--bg-surface)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 6,
-                  padding: '8px 0',
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-bright)',
+                  borderRadius: 10,
+                  padding: 8,
                   minWidth: 220,
                   maxHeight: 280,
                   overflowY: 'auto',
                   zIndex: 50,
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
                 }}
               >
+                {topicFilter.length > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4, paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
+                    <button
+                      onClick={() => setTopicFilter([])}
+                      style={{ fontSize: 11, color: '#E8C84A', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                )}
                 {allTopics.map((t) => {
                   const checked = topicFilter.includes(t)
+                  const count = topicCounts[t] ?? 0
                   return (
                     <label
                       key={t}
@@ -665,11 +724,18 @@ export default function CallLogsPage() {
                         display: 'flex',
                         alignItems: 'center',
                         gap: 8,
-                        padding: '7px 14px',
-                        fontSize: 13,
+                        padding: '6px 8px',
+                        fontSize: 12,
                         color: 'var(--text-primary)',
                         cursor: 'pointer',
-                        background: checked ? 'var(--bg-elevated)' : 'transparent',
+                        borderRadius: 6,
+                        background: checked ? 'rgba(255,255,255,0.06)' : 'transparent',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!checked) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.06)'
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!checked) (e.currentTarget as HTMLElement).style.background = 'transparent'
                       }}
                     >
                       <input
@@ -678,7 +744,8 @@ export default function CallLogsPage() {
                         onChange={() => toggleTopic(t)}
                         style={{ accentColor: '#E8C84A' }}
                       />
-                      {toTitleCase(t)}
+                      <span style={{ flex: 1 }}>{toTitleCase(t)}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>({count})</span>
                     </label>
                   )
                 })}
@@ -802,9 +869,12 @@ export default function CallLogsPage() {
                               color: 'var(--text-tertiary)',
                               padding: 0,
                               lineHeight: 1,
+                              display: 'inline-block',
+                              transition: 'transform 0.15s',
+                              transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
                             }}
                           >
-                            {expanded ? '▾' : '▸'}
+                            ▸
                           </button>
                         </td>
 
