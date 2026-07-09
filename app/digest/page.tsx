@@ -1349,14 +1349,86 @@ export default function DigestPage() {
         @keyframes pulse { 0%,100%{opacity:0.6} 50%{opacity:0.35} }
 
         @media print {
-          .no-print { display: none !important; }
-          .print-header { display: flex !important; }
-          .page-break-before { page-break-before: always; }
-          body { font-size: 11px; }
-          * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-shadow: none !important; }
+          /* Hide navigation chrome */
+          nav,
+          aside,
+          header,
+          [data-sidebar],
+          .sidebar,
+          .top-nav,
+          .action-bar {
+            display: none !important;
+          }
+
+          /* Reset layout offsets imposed by the fixed sidebar/nav */
+          body,
+          html {
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          /* The main content wrapper Next.js renders — override
+             the ml-[220px] and mt-[52px] offsets */
+          main,
+          #__next > div,
+          #__next > div > div {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+          }
+
+          /* Digest content area itself */
+          .digest-content {
+            margin: 0 !important;
+            padding: 16px !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            box-sizing: border-box !important;
+          }
+
+          /* Force color printing */
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          /* Page breaks */
+          .page-break-before {
+            page-break-before: always !important;
+          }
+
+          /* Remove shadows */
+          * {
+            box-shadow: none !important;
+          }
+
+          /* Base font size for print */
+          body {
+            font-size: 11px !important;
+          }
+
+          /* Ensure cards don't overflow */
+          .digest-card,
+          [class*="rounded"],
+          [class*="border"] {
+            overflow: visible !important;
+            max-width: 100% !important;
+            box-sizing: border-box !important;
+          }
+
+          /* Action bar hidden */
+          .digest-action-bar {
+            display: none !important;
+          }
+
+          /* Print header visible */
+          .digest-print-header {
+            display: flex !important;
+          }
         }
         @media screen {
-          .print-header { display: none; }
+          .digest-print-header { display: none; }
         }
       `}</style>
 
@@ -1364,7 +1436,7 @@ export default function DigestPage() {
 
         {/* ── SECTION 1: print header ────────────────────────────────────── */}
         <div
-          className="print-header"
+          className="digest-print-header"
           style={{
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -1380,7 +1452,7 @@ export default function DigestPage() {
 
         {/* ── action bar ────────────────────────────────────────────────── */}
         <div
-          className="no-print"
+          className="digest-action-bar"
           style={{
             display: 'flex',
             justifyContent: 'space-between',
@@ -1432,7 +1504,7 @@ export default function DigestPage() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div className="digest-content" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
           {/* ── SECTION 2: AI narrative ──────────────────────────────────── */}
           <NarrativeSection
