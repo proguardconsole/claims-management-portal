@@ -17,7 +17,7 @@ const NAV_ITEMS = [
   { label: 'Open Claims',     href: '/claims',       icon: FileText        },
   { label: 'Analytics',       href: '/analytics',    icon: TrendingUp      },
   { label: 'Inspections',     href: '/inspections',  icon: ClipboardCheck  },
-  { label: 'Call Logs',       href: '/call-logs',    icon: Phone           },
+  { label: 'Call Logs',       href: '/calls',         icon: Phone           },
   { label: 'Closed / Denied', href: '/closed',       icon: Archive         },
   { label: 'Weekly Digest',   href: '/digest',       icon: FileBarChart    },
 ]

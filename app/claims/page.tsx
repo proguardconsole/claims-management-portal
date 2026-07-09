@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { FileText, Phone, ExternalLink } from 'lucide-react'
 
 // ─── types ─────────────────────────────────────────────────────────────────────
@@ -799,6 +800,7 @@ function ClaimDetail({
 // ─── main page ─────────────────────────────────────────────────────────────────
 
 export default function ClaimsPage() {
+  const searchParams = useSearchParams()
   const [allClaims, setAllClaims] = useState<Claim[]>([])
   const [loadingList, setLoadingList] = useState(true)
   const [pipeline, setPipeline] = useState<'all' | 'AST' | 'UST'>('all')
@@ -819,6 +821,18 @@ export default function ClaimsPage() {
       .catch(console.error)
       .finally(() => setLoadingList(false))
   }, [])
+
+  // Deep-link: ?claim=FS1872 auto-selects the matching claim
+  useEffect(() => {
+    const claimParam = searchParams.get('claim')
+    if (!claimParam || allClaims.length === 0) return
+    const found = allClaims.find(
+      (c) =>
+        c.field_service_number === claimParam ||
+        c.deal_name?.includes(claimParam),
+    )
+    if (found) setSelectedClaim(found)
+  }, [allClaims, searchParams])
 
   // Fetch stage history + calls when selected claim changes
   useEffect(() => {
