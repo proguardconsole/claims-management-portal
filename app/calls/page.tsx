@@ -40,7 +40,6 @@ type DaysFilter  = 1 | 7 | 30
 
 // ─── constants ─────────────────────────────────────────────────────────────────
 
-const AUTH = `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET ?? ''}`
 
 const TABS: { key: ActiveTab; label: string }[] = [
   { key: 'all',      label: 'All' },
@@ -386,9 +385,7 @@ export default function CallLogsPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/calls?days=${days}`, {
-        headers: { Authorization: AUTH },
-      })
+      const res = await fetch(`/api/internal/calls?days=${days}`)
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string }
         throw new Error(body.error ?? `HTTP ${res.status}`)

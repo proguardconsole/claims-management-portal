@@ -1197,14 +1197,10 @@ export default function DigestPage() {
   const [narrativeStatus, setNarrativeStatus] = useState<NarrativeStatus>('idle')
   const [narrativeText, setNarrativeText] = useState<string | null>(null)
 
-  const auth = `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`
-
   async function fetchNarrative() {
     setNarrativeStatus('loading')
     try {
-      const res = await fetch('/api/digest/narrative', {
-        headers: { Authorization: auth },
-      })
+      const res = await fetch('/api/internal/digest/narrative')
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`)
       }
@@ -1226,9 +1222,7 @@ export default function DigestPage() {
     setNarrativeStatus('idle')
     setNarrativeText(null)
     try {
-      const res = await fetch('/api/digest', {
-        headers: { Authorization: auth },
-      })
+      const res = await fetch('/api/internal/digest')
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string }
         throw new Error(body.error ?? `HTTP ${res.status}`)

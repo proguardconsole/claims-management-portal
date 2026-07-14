@@ -2006,11 +2006,10 @@ export default function AnalyticsPage() {
     setOpsLoading(true)
     setOpsError(null)
     try {
-      const auth = `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`
       const [bRes, sRes, aRes] = await Promise.all([
-        fetch('/api/analytics?view=bottleneck', { headers: { Authorization: auth } }),
-        fetch('/api/analytics?view=stale',      { headers: { Authorization: auth } }),
-        fetch('/api/analytics?view=agents',     { headers: { Authorization: auth } }),
+        fetch('/api/internal/analytics?view=bottleneck'),
+        fetch('/api/internal/analytics?view=stale'),
+        fetch('/api/internal/analytics?view=agents'),
       ])
       if (!bRes.ok) {
         const body = await bRes.json().catch(() => ({}))
@@ -2039,12 +2038,11 @@ export default function AnalyticsPage() {
     setLeadLoading(true)
     setLeadError(null)
     try {
-      const auth = `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`
       const [vRes, dRes, fRes, denRes] = await Promise.all([
-        fetch('/api/analytics?view=volume',    { headers: { Authorization: auth } }),
-        fetch('/api/analytics?view=dwell',     { headers: { Authorization: auth } }),
-        fetch('/api/analytics?view=financial', { headers: { Authorization: auth } }),
-        fetch('/api/analytics?view=denials',   { headers: { Authorization: auth } }),
+        fetch('/api/internal/analytics?view=volume'),
+        fetch('/api/internal/analytics?view=dwell'),
+        fetch('/api/internal/analytics?view=financial'),
+        fetch('/api/internal/analytics?view=denials'),
       ])
       if (!vRes.ok) {
         const body = await vRes.json().catch(() => ({}))
@@ -2090,10 +2088,7 @@ export default function AnalyticsPage() {
       }
       setDwellLoading(true)
       try {
-        const auth = `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`
-        const res = await fetch(`/api/analytics?view=dwell&pipeline=${p}`, {
-          headers: { Authorization: auth },
-        })
+        const res = await fetch(`/api/internal/analytics?view=dwell&pipeline=${p}`)
         if (!res.ok) throw new Error(`Failed (${res.status})`)
         const data = await res.json()
         setDwellRows(data.data ?? [])

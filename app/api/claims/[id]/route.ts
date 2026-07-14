@@ -35,9 +35,15 @@ type CallLog = {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
+  const authHeader = req.headers.get('Authorization')
+  const expected = `Bearer ${process.env.CRON_SECRET}`
+  if (!authHeader || authHeader !== expected) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const claimId = params.id
   const sb = getServerSupabase()
 

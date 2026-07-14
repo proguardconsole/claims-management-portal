@@ -1,9 +1,15 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
 
 const OPEN_STATUSES = ['ast_open', 'ust_open', 'ust_pre_tank'] as const
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const authHeader = req.headers.get('Authorization')
+  const expected = `Bearer ${process.env.CRON_SECRET}`
+  if (!authHeader || authHeader !== expected) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const sb = getServerSupabase()
 
   const { data, error } = await sb

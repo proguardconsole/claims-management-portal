@@ -4,6 +4,12 @@ import { getServerSupabase } from '../../../lib/supabase/server'
 const DEFAULT_LIMIT = 500
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  const authHeader = req.headers.get('Authorization')
+  const expected = `Bearer ${process.env.CRON_SECRET}`
+  if (!authHeader || authHeader !== expected) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const sb = getServerSupabase()
   const p = req.nextUrl.searchParams
 
