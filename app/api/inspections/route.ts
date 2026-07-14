@@ -37,7 +37,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
       for (const r of data ?? []) {
-        const s = (r.stage as string | null) ?? 'Unknown'
+        // Merge Complete into Inspection Performed — same status in business terms
+        const raw = (r.stage as string | null) ?? 'Unknown'
+        const s = raw === 'Complete' ? 'Inspection Performed' : raw
         stageCounts[s] = (stageCounts[s] ?? 0) + 1
 
         const res = r.inspection_result as string | null
@@ -51,11 +53,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       pageOffset += META_BATCH
     }
 
+    const twoMonthsAgo = new Date()
+    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2)
+    const { count: staleCount } = await sb
+      .from('inspections')
+      .select('*', { count: 'exact', head: true })
+      .lt('modified_time', twoMonthsAgo.toISOString())
+
     const total = Object.values(stageCounts).reduce((a, b) => a + b, 0)
     return NextResponse.json({
       stages: stageCounts,
       results: resultCounts,
       parks: Array.from(parkSet).sort(),
+      stale_count: staleCount ?? 0,
       total,
     })
   }
@@ -74,6 +84,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const sortOpt = SORT_MAP[sortKey] ?? SORT_MAP.closing_date_desc
   const limit = Math.min(parseInt(p.get('limit') ?? String(PAGE_LIMIT), 10), 500)
   const offset = parseInt(p.get('offset') ?? '0', 10)
+  const stale = p.get('stale') === '1'
 
   let query = sb
     .from('inspections')
@@ -81,7 +92,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .order(sortOpt.col, { ascending: sortOpt.asc })
     .range(offset, offset + limit - 1)
 
-  if (stage) query = query.eq('stage', stage)
+  if (stage) {
+    if (stage === 'Inspection Performed') {
+      query = query.in('stage', ['Inspection Performed', 'Complete'])
+    } else {
+      query = query.eq('stage', stage)
+    }
+  }
   if (stateF) query = query.eq('state', stateF)
   if (resultF) query = query.eq('inspection_result', resultF)
 
@@ -89,6 +106,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     query = query.eq('mobile_home_park_id', parkId)
   } else if (park) {
     query = query.ilike('mobile_home_park_name', `%${park}%`)
+  }
+
+  if (stale) {
+    const staleThreshold = new Date()
+    staleThreshold.setMonth(staleThreshold.getMonth() - 2)
+    query = query.lt('modified_time', staleThreshold.toISOString())
   }
 
   if (from) query = query.gte('closing_date', from)

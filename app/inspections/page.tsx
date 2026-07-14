@@ -411,7 +411,10 @@ function FilterBar({
   setSearch,
   stages,
   counts,
-  resultOptions,
+  staleFilter,
+  setStaleFilter,
+  staleCount,
+  resultCounts,
   parkOptions,
 }: {
   stageFilter: string
@@ -438,7 +441,10 @@ function FilterBar({
   setSearch: (s: string) => void
   stages: string[]
   counts: Record<string, number>
-  resultOptions: string[]
+  staleFilter: boolean
+  setStaleFilter: (v: boolean) => void
+  staleCount: number
+  resultCounts: Record<string, number>
   parkOptions: string[]
 }) {
   const allTabs = ['all', ...stages]
@@ -511,6 +517,24 @@ function FilterBar({
             </button>
           )
         })}
+        <button
+          onClick={() => setStaleFilter(!staleFilter)}
+          style={{
+            marginLeft: 4,
+            padding: '4px 10px',
+            fontSize: 11,
+            fontWeight: staleFilter ? 700 : 500,
+            cursor: 'pointer',
+            background: staleFilter ? '#7f1d1d' : 'transparent',
+            color: staleFilter ? '#fca5a5' : '#f87171',
+            border: `1px solid ${staleFilter ? '#dc2626' : 'rgba(239,68,68,0.4)'}`,
+            borderLeft: staleFilter ? '3px solid #dc2626' : '3px solid rgba(239,68,68,0.3)',
+            borderRadius: 4,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Stale · {staleCount.toLocaleString()}
+        </button>
       </div>
 
       {/* State pills */}
@@ -624,9 +648,11 @@ function FilterBar({
           style={selectStyle}
         >
           <option value="">All results</option>
-          {resultOptions.map((r) => (
-            <option key={r} value={r}>{r}</option>
-          ))}
+          {Object.entries(resultCounts)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([r, c]) => (
+              <option key={r} value={r}>{r} ({c.toLocaleString()})</option>
+            ))}
         </select>
         <select
           value={sortOrder}
@@ -1010,18 +1036,21 @@ export default function InspectionsPage() {
   const [sortOrder, setSortOrder] = useState('closing_date_desc')
   const [search, setSearch] = useState('')
   const [selectedInspection, setSelectedInspection] = useState<Inspection | null>(null)
-  const [resultOptions, setResultOptions] = useState<string[]>([])
+  const [resultCounts, setResultCounts] = useState<Record<string, number>>({})
+  const [staleCount, setStaleCount] = useState(0)
+  const [staleFilter, setStaleFilter] = useState(false)
   const [parkOptions, setParkOptions] = useState<string[]>([])
 
   useEffect(() => {
     fetch('/api/internal/inspections?meta=1')
       .then((r) => r.json())
-      .then((d: { stages: Record<string, number>; results: Record<string, number>; parks: string[]; total: number }) => {
+      .then((d: { stages: Record<string, number>; results: Record<string, number>; parks: string[]; stale_count: number; total: number }) => {
         setStageCounts(d.stages ?? {})
         setTotalCount(d.total ?? 0)
         setStages(Object.keys(d.stages ?? {}).sort())
-        setResultOptions(Object.keys(d.results ?? {}).sort())
+        setResultCounts(d.results ?? {})
         setParkOptions(d.parks ?? [])
+        setStaleCount(d.stale_count ?? 0)
       })
       .catch(console.error)
   }, [])
@@ -1032,6 +1061,7 @@ export default function InspectionsPage() {
     if (stateFilter !== 'all') params.set('state', stateFilter)
     if (resultFilter) params.set('inspection_result', resultFilter)
     if (parkFilter) params.set('park', parkFilter)
+    if (staleFilter) params.set('stale', '1')
     if (search) params.set('search', search)
     params.set('sort', sortOrder)
     params.set('limit', '100')
@@ -1050,7 +1080,7 @@ export default function InspectionsPage() {
 
     for (const [k, v] of Object.entries(extra)) params.set(k, v)
     return params
-  }, [stageFilter, stateFilter, resultFilter, parkFilter, datePreset, customFrom, customTo, inspDateFrom, inspDateTo, sortOrder, search])
+  }, [stageFilter, stateFilter, resultFilter, parkFilter, staleFilter, datePreset, customFrom, customTo, inspDateFrom, inspDateTo, sortOrder, search])
 
   const fetchInspections = useCallback(() => {
     setLoading(true)
@@ -1131,7 +1161,10 @@ export default function InspectionsPage() {
           setSearch={setSearch}
           stages={stages}
           counts={counts}
-          resultOptions={resultOptions}
+          staleFilter={staleFilter}
+          setStaleFilter={setStaleFilter}
+          staleCount={staleCount}
+          resultCounts={resultCounts}
           parkOptions={parkOptions}
         />
 
