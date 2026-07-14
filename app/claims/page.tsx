@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { FileText, Phone, ExternalLink } from 'lucide-react'
+import AdvancedFilterBar, { type FilterState, DEFAULT_FILTERS } from '../../components/FilterBar'
 
 // ─── types ─────────────────────────────────────────────────────────────────────
 
@@ -895,6 +896,26 @@ export default function ClaimsPage() {
   const [calls, setCalls] = useState<CallLog[]>([])
   const [phone, setPhone] = useState<string | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [filterState, setFilterState] = useState<FilterState>(DEFAULT_FILTERS)
+
+  const metaOptions = useMemo(() => {
+    const ownersMap: Record<string, true>   = {}
+    const dealersMap: Record<string, true>  = {}
+    const stagesMap: Record<string, true>   = {}
+    const triggersMap: Record<string, true> = {}
+    for (const c of allClaims) {
+      if (c.owner_name)    ownersMap[c.owner_name]      = true
+      if (c.account_name)  dealersMap[c.account_name]   = true
+      if (c.stage)         stagesMap[c.stage]            = true
+      if (c.claim_trigger) triggersMap[c.claim_trigger]  = true
+    }
+    return {
+      owners:     Object.keys(ownersMap).sort(),
+      oilDealers: Object.keys(dealersMap).sort(),
+      stages:     Object.keys(stagesMap).sort(),
+      triggers:   Object.keys(triggersMap).sort(),
+    }
+  }, [allClaims])
 
   // Fetch all open claims once on mount
   useEffect(() => {
@@ -945,7 +966,7 @@ export default function ClaimsPage() {
       .finally(() => setLoadingDetail(false))
   }, [selectedClaim?.id])
 
-  // Client-side filter
+  // Client-side filter + sort
   const filtered = allClaims.filter((c) => {
     const matchesPipeline =
       pipeline === 'all' ||
@@ -961,7 +982,26 @@ export default function ClaimsPage() {
       c.owner_name?.toLowerCase().includes(s) ||
       c.adjuster_name?.toLowerCase().includes(s) ||
       c.account_name?.toLowerCase().includes(s)
-    return matchesPipeline && matchesSearch
+    const matchesOwner   = !filterState.owner     || c.owner_name   === filterState.owner
+    const matchesDealer  = !filterState.oilDealer || c.account_name === filterState.oilDealer
+    const matchesStage   = !filterState.stage     || c.stage        === filterState.stage
+    const matchesTrigger = !filterState.trigger   || c.claim_trigger === filterState.trigger
+    const dr = c.date_claim_is_reported ?? ''
+    const matchesFrom = !filterState.dateFrom || dr >= filterState.dateFrom
+    const matchesTo   = !filterState.dateTo   || dr <= filterState.dateTo
+    return matchesPipeline && matchesSearch &&
+           matchesOwner && matchesDealer && matchesStage && matchesTrigger &&
+           matchesFrom && matchesTo
+  })
+
+  const sorted = [...filtered].sort((a, b) => {
+    switch (filterState.sort) {
+      case 'updated_asc':   return (a.modified_time ?? '').localeCompare(b.modified_time ?? '')
+      case 'reported_desc': return (b.date_claim_is_reported ?? '').localeCompare(a.date_claim_is_reported ?? '')
+      case 'reported_asc':  return (a.date_claim_is_reported ?? '').localeCompare(b.date_claim_is_reported ?? '')
+      case 'fsn_asc':       return (a.field_service_number ?? '').localeCompare(b.field_service_number ?? '')
+      default:              return (b.modified_time ?? '').localeCompare(a.modified_time ?? '')
+    }
   })
 
   const counts = {
@@ -998,6 +1038,14 @@ export default function ClaimsPage() {
           setSearch={setSearch}
           counts={counts}
         />
+        <AdvancedFilterBar
+          owners={metaOptions.owners}
+          oilDealers={metaOptions.oilDealers}
+          stages={metaOptions.stages}
+          triggers={metaOptions.triggers}
+          filters={filterState}
+          onChange={setFilterState}
+        />
 
         {/* Scrollable claim list */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -1005,12 +1053,12 @@ export default function ClaimsPage() {
             <div style={{ padding: 24, color: 'var(--text-tertiary)', fontSize: 13 }}>
               Loading claims...
             </div>
-          ) : filtered.length === 0 ? (
+          ) : sorted.length === 0 ? (
             <div style={{ padding: 24, color: 'var(--text-tertiary)', fontSize: 13 }}>
               No claims match current filters.
             </div>
           ) : (
-            filtered.map((claim) => (
+            sorted.map((claim) => (
               <ClaimRow
                 key={claim.id}
                 claim={claim}
@@ -1032,7 +1080,7 @@ export default function ClaimsPage() {
             flexShrink: 0,
           }}
         >
-          {filtered.length} of {allClaims.length} claims
+          {sorted.length} of {allClaims.length} claims
         </div>
       </div>
 

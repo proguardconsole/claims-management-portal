@@ -11,8 +11,44 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const sb = getServerSupabase()
+  const p  = req.nextUrl.searchParams
 
-  const { data, error } = await sb
+  // Meta endpoint — returns distinct option lists for filter dropdowns
+  if (p.get('meta') === '1') {
+    const { data: meta, error: metaErr } = await sb
+      .from('claims')
+      .select('owner_name, account_name, stage, claim_trigger')
+      .in('claim_status', [...OPEN_STATUSES])
+    if (metaErr) return NextResponse.json({ error: metaErr.message }, { status: 500 })
+    const ownersMap: Record<string, true>   = {}
+    const dealersMap: Record<string, true>  = {}
+    const stagesMap: Record<string, true>   = {}
+    const triggersMap: Record<string, true> = {}
+    for (const r of meta ?? []) {
+      if (r.owner_name)    ownersMap[r.owner_name]      = true
+      if (r.account_name)  dealersMap[r.account_name]   = true
+      if (r.stage)         stagesMap[r.stage]            = true
+      if (r.claim_trigger) triggersMap[r.claim_trigger]  = true
+    }
+    return NextResponse.json({
+      owners:     Object.keys(ownersMap).sort(),
+      oilDealers: Object.keys(dealersMap).sort(),
+      stages:     Object.keys(stagesMap).sort(),
+      triggers:   Object.keys(triggersMap).sort(),
+    })
+  }
+
+  const SORT_MAP: Record<string, { col: string; asc: boolean }> = {
+    updated_desc:  { col: 'modified_time',          asc: false },
+    updated_asc:   { col: 'modified_time',          asc: true  },
+    reported_desc: { col: 'date_claim_is_reported', asc: false },
+    reported_asc:  { col: 'date_claim_is_reported', asc: true  },
+    fsn_asc:       { col: 'field_service_number',   asc: true  },
+  }
+  const sort      = p.get('sort') ?? 'updated_desc'
+  const { col, asc } = SORT_MAP[sort] ?? SORT_MAP['updated_desc']
+
+  let query = sb
     .from('claims')
     .select(
       `id, field_service_number, deal_name, stage, claim_status,
@@ -24,7 +60,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
        proceed_to_remediation, record_type, claim_trigger, description`,
     )
     .in('claim_status', [...OPEN_STATUSES])
-    .order('modified_time', { ascending: false })
+    .order(col, { ascending: asc })
+
+  const owner     = p.get('owner')
+  const oilDealer = p.get('oil_dealer')
+  const stage     = p.get('stage')
+  const trigger   = p.get('trigger')
+  const dateFrom  = p.get('date_from')
+  const dateTo    = p.get('date_to')
+
+  if (owner)     query = query.eq('owner_name', owner)
+  if (oilDealer) query = query.eq('account_name', oilDealer)
+  if (stage)     query = query.eq('stage', stage)
+  if (trigger)   query = query.eq('claim_trigger', trigger)
+  if (dateFrom)  query = query.gte('date_claim_is_reported', dateFrom)
+  if (dateTo)    query = query.lte('date_claim_is_reported', dateTo)
+
+  const { data, error } = await query
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
