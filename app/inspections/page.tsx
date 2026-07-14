@@ -406,7 +406,7 @@ function ParkHistory({
 
   useEffect(() => {
     setLoading(true)
-    fetch(`/api/inspections?park_id=${encodeURIComponent(parkId)}&limit=10`)
+    fetch(`/api/internal/inspections?park_id=${encodeURIComponent(parkId)}&limit=10`)
       .then((r) => r.json())
       .then((d: { inspections: Inspection[] }) =>
         setHistory(
@@ -701,7 +701,7 @@ export default function InspectionsPage() {
     }
 
     setLoading(true)
-    fetch(`/api/inspections?${params.toString()}`)
+    fetch(`/api/internal/inspections?${params.toString()}`)
       .then((r) => r.json())
       .then((d: { inspections: Inspection[]; stages: string[] }) => {
         setInspections(d.inspections ?? [])
