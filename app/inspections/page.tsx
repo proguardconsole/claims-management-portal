@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { FileText, ExternalLink } from 'lucide-react'
 
 // ─── types ─────────────────────────────────────────────────────────────────────
@@ -10,6 +10,8 @@ type Inspection = {
   name: string | null
   stage: string | null
   closing_date: string | null
+  inspection_date: string | null
+  inspection_result: string | null
   mobile_home_park_name: string | null
   mobile_home_park_id: string | null
   park_inspection_name: string | null
@@ -62,6 +64,15 @@ function stageBorderColor(stage: string | null): string {
   if (s === 'complete') return 'var(--accent-green)'
   if (s === 'inspection performed') return 'var(--accent-amber)'
   return 'var(--border)'
+}
+
+function resultStyle(result: string | null): { color: string; border: string } {
+  if (!result) return { color: 'var(--text-tertiary)', border: 'var(--border)' }
+  const r = result.toLowerCase()
+  if (r === 'approved') return { color: 'var(--accent-green)', border: 'var(--accent-green)' }
+  if (r === 'repairs needed') return { color: 'var(--accent-amber)', border: 'var(--accent-amber)' }
+  if (r === 'tank replacement needed') return { color: 'var(--accent-red)', border: 'var(--accent-red)' }
+  return { color: 'var(--text-tertiary)', border: 'var(--border)' }
 }
 
 function presetDates(preset: DatePreset): { from: string; to: string } | null {
@@ -131,6 +142,25 @@ function StageBadge({ stage }: { stage: string | null }) {
   )
 }
 
+function ResultBadge({ result }: { result: string | null }) {
+  const { color, border } = resultStyle(result)
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        fontWeight: 600,
+        color,
+        border: `1px solid ${border}`,
+        borderRadius: 3,
+        padding: '2px 7px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {result ?? '—'}
+    </span>
+  )
+}
+
 function InspectionRow({
   inspection,
   selected,
@@ -159,7 +189,6 @@ function InspectionRow({
         transition: 'background 0.1s',
       }}
     >
-      {/* Row 1 — street name */}
       <div
         style={{
           fontSize: 13,
@@ -174,7 +203,6 @@ function InspectionRow({
         {inspection.street ?? inspection.name ?? '—'}
       </div>
 
-      {/* Row 2 — park name + stage */}
       <div
         style={{
           display: 'flex',
@@ -200,41 +228,218 @@ function InspectionRow({
         <StageBadge stage={inspection.stage} />
       </div>
 
-      {/* Row 3 — date + state */}
-      <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-        {formatMonthYear(inspection.closing_date)}
-        {inspection.state ? ` · ${inspection.state}` : ''}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+          {formatMonthYear(inspection.closing_date)}
+          {inspection.state ? ` · ${inspection.state}` : ''}
+        </span>
+        {inspection.inspection_result && (
+          <ResultBadge result={inspection.inspection_result} />
+        )}
       </div>
     </div>
   )
 }
 
+// ─── ParkCombobox ───────────────────────────────────────────────────────────────
+
+function ParkCombobox({
+  value,
+  onChange,
+  options,
+}: {
+  value: string
+  onChange: (v: string) => void
+  options: string[]
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const filtered = options.filter((o) => o.toLowerCase().includes(query.toLowerCase())).slice(0, 40)
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '5px 8px',
+    fontSize: 11,
+    background: 'var(--bg-surface)',
+    border: '1px solid var(--border)',
+    borderRadius: 4,
+    color: 'var(--text-primary)',
+    outline: 'none',
+    boxSizing: 'border-box',
+  }
+
+  if (value) {
+    return (
+      <div ref={containerRef} style={{ position: 'relative' }}>
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '3px 8px',
+            fontSize: 11,
+            fontWeight: 600,
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-bright)',
+            borderRadius: 4,
+            color: 'var(--text-primary)',
+            cursor: 'default',
+            maxWidth: '100%',
+          }}
+        >
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+            {value}
+          </span>
+          <button
+            onClick={() => { onChange(''); setQuery('') }}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--text-tertiary)',
+              fontSize: 13,
+              lineHeight: 1,
+              padding: 0,
+              flexShrink: 0,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative' }}>
+      <input
+        type="text"
+        value={query}
+        placeholder="Filter by park…"
+        onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        style={inputStyle}
+      />
+      {open && filtered.length > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            right: 0,
+            zIndex: 100,
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-bright)',
+            borderRadius: 4,
+            maxHeight: 200,
+            overflowY: 'auto',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+          }}
+        >
+          {filtered.map((o) => (
+            <div
+              key={o}
+              onMouseDown={(e) => { e.preventDefault(); onChange(o); setQuery(''); setOpen(false) }}
+              style={{
+                padding: '6px 10px',
+                fontSize: 11,
+                cursor: 'pointer',
+                color: 'var(--text-primary)',
+                borderBottom: '1px solid var(--border)',
+              }}
+              onMouseEnter={(e) => {
+                ;(e.currentTarget as HTMLDivElement).style.background = 'var(--bg-surface)'
+              }}
+              onMouseLeave={(e) => {
+                ;(e.currentTarget as HTMLDivElement).style.background = 'transparent'
+              }}
+            >
+              {o}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── FilterBar ──────────────────────────────────────────────────────────────────
+
+const STATE_PILLS = ['CT', 'MA', 'MD', 'NJ', 'NY', 'PA']
+
+const SORT_OPTIONS = [
+  { value: 'closing_date_desc', label: 'Closing Date: Newest' },
+  { value: 'closing_date_asc', label: 'Closing Date: Oldest' },
+  { value: 'inspection_date_desc', label: 'Insp. Date: Newest' },
+  { value: 'inspection_date_asc', label: 'Insp. Date: Oldest' },
+]
+
 function FilterBar({
   stageFilter,
   setStageFilter,
+  stateFilter,
+  setStateFilter,
+  resultFilter,
+  setResultFilter,
+  parkFilter,
+  setParkFilter,
   datePreset,
   setDatePreset,
   customFrom,
   setCustomFrom,
   customTo,
   setCustomTo,
+  inspDateFrom,
+  setInspDateFrom,
+  inspDateTo,
+  setInspDateTo,
+  sortOrder,
+  setSortOrder,
   search,
   setSearch,
   stages,
   counts,
+  resultOptions,
+  parkOptions,
 }: {
   stageFilter: string
   setStageFilter: (s: string) => void
+  stateFilter: string
+  setStateFilter: (s: string) => void
+  resultFilter: string
+  setResultFilter: (s: string) => void
+  parkFilter: string
+  setParkFilter: (s: string) => void
   datePreset: DatePreset
   setDatePreset: (p: DatePreset) => void
   customFrom: string
   setCustomFrom: (s: string) => void
   customTo: string
   setCustomTo: (s: string) => void
+  inspDateFrom: string
+  setInspDateFrom: (s: string) => void
+  inspDateTo: string
+  setInspDateTo: (s: string) => void
+  sortOrder: string
+  setSortOrder: (s: string) => void
   search: string
   setSearch: (s: string) => void
   stages: string[]
   counts: Record<string, number>
+  resultOptions: string[]
+  parkOptions: string[]
 }) {
   const allTabs = ['all', ...stages]
   const presets: { key: DatePreset; label: string }[] = [
@@ -253,6 +458,18 @@ function FilterBar({
     borderRadius: 4,
     color: 'var(--text-primary)',
     outline: 'none',
+  }
+
+  const selectStyle: React.CSSProperties = {
+    flex: 1,
+    padding: '4px 6px',
+    fontSize: 11,
+    background: 'var(--bg-surface)',
+    border: '1px solid var(--border)',
+    borderRadius: 4,
+    color: 'var(--text-primary)',
+    outline: 'none',
+    cursor: 'pointer',
   }
 
   return (
@@ -296,8 +513,39 @@ function FilterBar({
         })}
       </div>
 
-      {/* Date preset row */}
+      {/* State pills */}
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase', marginRight: 2 }}>
+          State
+        </span>
+        {STATE_PILLS.map((st) => {
+          const active = stateFilter === st
+          return (
+            <button
+              key={st}
+              onClick={() => setStateFilter(active ? 'all' : st)}
+              style={{
+                padding: '3px 8px',
+                fontSize: 11,
+                fontWeight: active ? 700 : 400,
+                cursor: 'pointer',
+                background: active ? 'var(--bg-elevated)' : 'transparent',
+                color: active ? 'var(--accent-yellow)' : 'var(--text-tertiary)',
+                border: `1px solid ${active ? 'var(--accent-yellow)' : 'transparent'}`,
+                borderRadius: 4,
+              }}
+            >
+              {st}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Closing date preset row */}
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase', marginRight: 2 }}>
+          Close
+        </span>
         {presets.map(({ key, label }) => {
           const active = datePreset === key
           return (
@@ -321,7 +569,7 @@ function FilterBar({
         })}
       </div>
 
-      {/* Custom date inputs */}
+      {/* Custom closing date inputs */}
       {datePreset === 'custom' && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <input
@@ -340,12 +588,66 @@ function FilterBar({
         </div>
       )}
 
+      {/* Inspection date range */}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase', flexShrink: 0 }}>
+          Insp.
+        </span>
+        <input
+          type="date"
+          value={inspDateFrom}
+          onChange={(e) => setInspDateFrom(e.target.value)}
+          style={{ ...inputStyle, flex: 1 }}
+        />
+        <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>to</span>
+        <input
+          type="date"
+          value={inspDateTo}
+          onChange={(e) => setInspDateTo(e.target.value)}
+          style={{ ...inputStyle, flex: 1 }}
+        />
+        {(inspDateFrom || inspDateTo) && (
+          <button
+            onClick={() => { setInspDateFrom(''); setInspDateTo('') }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 13, padding: 0 }}
+          >
+            ×
+          </button>
+        )}
+      </div>
+
+      {/* Result + Sort row */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <select
+          value={resultFilter}
+          onChange={(e) => setResultFilter(e.target.value)}
+          style={selectStyle}
+        >
+          <option value="">All results</option>
+          {resultOptions.map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
+        </select>
+        <select
+          value={sortOrder}
+          onChange={(e) => setSortOrder(e.target.value)}
+          style={selectStyle}
+        >
+          {SORT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Park combobox */}
+      <ParkCombobox value={parkFilter} onChange={setParkFilter} options={parkOptions} />
+
       {/* Search */}
       <input
         type="text"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search park, address, contact..."
+        placeholder="Search address, contact…"
         style={{
           width: '100%',
           padding: '6px 10px',
@@ -553,7 +855,12 @@ function InspectionDetail({ inspection }: { inspection: Inspection }) {
           >
             {inspection.name ?? '—'}
           </div>
-          <StageBadge stage={inspection.stage} />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <StageBadge stage={inspection.stage} />
+            {inspection.inspection_result && (
+              <ResultBadge result={inspection.inspection_result} />
+            )}
+          </div>
         </div>
         <a
           href={zohoUrl}
@@ -632,6 +939,14 @@ function InspectionDetail({ inspection }: { inspection: Inspection }) {
             <InfoLabel>Stage</InfoLabel>
             <InfoValue>{inspection.stage}</InfoValue>
 
+            <InfoLabel>Inspection Result</InfoLabel>
+            <div style={{ marginBottom: 12 }}>
+              <ResultBadge result={inspection.inspection_result} />
+            </div>
+
+            <InfoLabel>Inspection Date</InfoLabel>
+            <InfoValue>{formatDate(inspection.inspection_date)}</InfoValue>
+
             <InfoLabel>Closing Date</InfoLabel>
             <InfoValue>{formatDate(inspection.closing_date)}</InfoValue>
 
@@ -684,16 +999,41 @@ export default function InspectionsPage() {
   const [loading, setLoading] = useState(true)
 
   const [stageFilter, setStageFilter] = useState('all')
+  const [stateFilter, setStateFilter] = useState('all')
+  const [resultFilter, setResultFilter] = useState('')
+  const [parkFilter, setParkFilter] = useState('')
   const [datePreset, setDatePreset] = useState<DatePreset>('all')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
+  const [inspDateFrom, setInspDateFrom] = useState('')
+  const [inspDateTo, setInspDateTo] = useState('')
+  const [sortOrder, setSortOrder] = useState('closing_date_desc')
   const [search, setSearch] = useState('')
   const [selectedInspection, setSelectedInspection] = useState<Inspection | null>(null)
+  const [resultOptions, setResultOptions] = useState<string[]>([])
+  const [parkOptions, setParkOptions] = useState<string[]>([])
 
-  const fetchInspections = useCallback(() => {
+  useEffect(() => {
+    fetch('/api/internal/inspections?meta=1')
+      .then((r) => r.json())
+      .then((d: { stages: Record<string, number>; results: Record<string, number>; parks: string[]; total: number }) => {
+        setStageCounts(d.stages ?? {})
+        setTotalCount(d.total ?? 0)
+        setStages(Object.keys(d.stages ?? {}).sort())
+        setResultOptions(Object.keys(d.results ?? {}).sort())
+        setParkOptions(d.parks ?? [])
+      })
+      .catch(console.error)
+  }, [])
+
+  const buildParams = useCallback((extra: Record<string, string> = {}): URLSearchParams => {
     const params = new URLSearchParams()
     if (stageFilter !== 'all') params.set('stage', stageFilter)
+    if (stateFilter !== 'all') params.set('state', stateFilter)
+    if (resultFilter) params.set('inspection_result', resultFilter)
+    if (parkFilter) params.set('park', parkFilter)
     if (search) params.set('search', search)
+    params.set('sort', sortOrder)
     params.set('limit', '100')
 
     const dates = presetDates(datePreset)
@@ -705,8 +1045,16 @@ export default function InspectionsPage() {
       if (customTo) params.set('to', customTo)
     }
 
+    if (inspDateFrom) params.set('date_from', inspDateFrom)
+    if (inspDateTo) params.set('date_to', inspDateTo)
+
+    for (const [k, v] of Object.entries(extra)) params.set(k, v)
+    return params
+  }, [stageFilter, stateFilter, resultFilter, parkFilter, datePreset, customFrom, customTo, inspDateFrom, inspDateTo, sortOrder, search])
+
+  const fetchInspections = useCallback(() => {
     setLoading(true)
-    fetch(`/api/internal/inspections?${params.toString()}`)
+    fetch(`/api/internal/inspections?${buildParams().toString()}`)
       .then((r) => r.json())
       .then((d: { inspections: Inspection[] }) => {
         const list = d.inspections ?? []
@@ -715,40 +1063,15 @@ export default function InspectionsPage() {
       })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [stageFilter, datePreset, customFrom, customTo, search])
-
-  useEffect(() => {
-    fetch('/api/internal/inspections?meta=1')
-      .then((r) => r.json())
-      .then((d: { stages: Record<string, number>; total: number }) => {
-        setStageCounts(d.stages ?? {})
-        setTotalCount(d.total ?? 0)
-        setStages(Object.keys(d.stages ?? {}).sort())
-      })
-      .catch(console.error)
-  }, [])
+  }, [buildParams])
 
   useEffect(() => {
     fetchInspections()
   }, [fetchInspections])
 
   const loadMore = useCallback(() => {
-    const params = new URLSearchParams()
-    if (stageFilter !== 'all') params.set('stage', stageFilter)
-    if (search) params.set('search', search)
-    params.set('limit', '100')
-    params.set('offset', String(inspections.length))
-
-    const dates = presetDates(datePreset)
-    if (dates) {
-      params.set('from', dates.from)
-      params.set('to', dates.to)
-    } else if (datePreset === 'custom') {
-      if (customFrom) params.set('from', customFrom)
-      if (customTo) params.set('to', customTo)
-    }
-
     setLoadingMore(true)
+    const params = buildParams({ offset: String(inspections.length) })
     fetch(`/api/internal/inspections?${params.toString()}`)
       .then((r) => r.json())
       .then((d: { inspections: Inspection[] }) => {
@@ -758,7 +1081,7 @@ export default function InspectionsPage() {
       })
       .catch(console.error)
       .finally(() => setLoadingMore(false))
-  }, [stageFilter, datePreset, customFrom, customTo, search, inspections.length])
+  }, [buildParams, inspections.length])
 
   const counts: Record<string, number> = { all: totalCount, ...stageCounts }
 
@@ -786,16 +1109,30 @@ export default function InspectionsPage() {
         <FilterBar
           stageFilter={stageFilter}
           setStageFilter={setStageFilter}
+          stateFilter={stateFilter}
+          setStateFilter={setStateFilter}
+          resultFilter={resultFilter}
+          setResultFilter={setResultFilter}
+          parkFilter={parkFilter}
+          setParkFilter={setParkFilter}
           datePreset={datePreset}
           setDatePreset={setDatePreset}
           customFrom={customFrom}
           setCustomFrom={setCustomFrom}
           customTo={customTo}
           setCustomTo={setCustomTo}
+          inspDateFrom={inspDateFrom}
+          setInspDateFrom={setInspDateFrom}
+          inspDateTo={inspDateTo}
+          setInspDateTo={setInspDateTo}
+          sortOrder={sortOrder}
+          setSortOrder={setSortOrder}
           search={search}
           setSearch={setSearch}
           stages={stages}
           counts={counts}
+          resultOptions={resultOptions}
+          parkOptions={parkOptions}
         />
 
         {/* Inspection list */}
