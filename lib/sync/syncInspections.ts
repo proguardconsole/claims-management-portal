@@ -50,6 +50,7 @@ function mapRecord(record: ZohoRecord, syncedAt: string) {
     owner_id: nested(record.Owner, 'id'),
     contact_name: nested(record.Contact_Name, 'name'),
     contact_id: nested(record.Contact_Name, 'id'),
+    field_service_number: str(record.Field_Service_Number),
     created_time: str(record.Created_Time),
     modified_time: str(record.Modified_Time),
     synced_at: syncedAt,
