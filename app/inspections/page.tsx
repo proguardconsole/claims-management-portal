@@ -677,6 +677,10 @@ function InspectionDetail({ inspection }: { inspection: Inspection }) {
 export default function InspectionsPage() {
   const [inspections, setInspections] = useState<Inspection[]>([])
   const [stages, setStages] = useState<string[]>([])
+  const [stageCounts, setStageCounts] = useState<Record<string, number>>({})
+  const [totalCount, setTotalCount] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const [stageFilter, setStageFilter] = useState('all')
@@ -690,6 +694,7 @@ export default function InspectionsPage() {
     const params = new URLSearchParams()
     if (stageFilter !== 'all') params.set('stage', stageFilter)
     if (search) params.set('search', search)
+    params.set('limit', '100')
 
     const dates = presetDates(datePreset)
     if (dates) {
@@ -703,33 +708,59 @@ export default function InspectionsPage() {
     setLoading(true)
     fetch(`/api/internal/inspections?${params.toString()}`)
       .then((r) => r.json())
-      .then((d: { inspections: Inspection[]; stages: string[] }) => {
-        setInspections(d.inspections ?? [])
-        if (d.stages?.length) setStages(d.stages)
+      .then((d: { inspections: Inspection[] }) => {
+        const list = d.inspections ?? []
+        setInspections(list)
+        setHasMore(list.length === 100)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [stageFilter, datePreset, customFrom, customTo, search])
 
   useEffect(() => {
+    fetch('/api/internal/inspections?meta=1')
+      .then((r) => r.json())
+      .then((d: { stages: Record<string, number>; total: number }) => {
+        setStageCounts(d.stages ?? {})
+        setTotalCount(d.total ?? 0)
+        setStages(Object.keys(d.stages ?? {}).sort())
+      })
+      .catch(console.error)
+  }, [])
+
+  useEffect(() => {
     fetchInspections()
   }, [fetchInspections])
 
-  // Stage counts from current result set
-  const counts: Record<string, number> = { all: inspections.length }
-  for (const insp of inspections) {
-    const s = insp.stage ?? 'Unknown'
-    counts[s] = (counts[s] ?? 0) + 1
-  }
+  const loadMore = useCallback(() => {
+    const params = new URLSearchParams()
+    if (stageFilter !== 'all') params.set('stage', stageFilter)
+    if (search) params.set('search', search)
+    params.set('limit', '100')
+    params.set('offset', String(inspections.length))
 
-  // Footer stats
-  const completeCount = inspections.filter(
-    (i) => i.stage?.toLowerCase() === 'complete',
-  ).length
-  const newCount = inspections.filter((i) => i.stage?.toLowerCase() === 'new').length
-  const performedCount = inspections.filter(
-    (i) => i.stage?.toLowerCase() === 'inspection performed',
-  ).length
+    const dates = presetDates(datePreset)
+    if (dates) {
+      params.set('from', dates.from)
+      params.set('to', dates.to)
+    } else if (datePreset === 'custom') {
+      if (customFrom) params.set('from', customFrom)
+      if (customTo) params.set('to', customTo)
+    }
+
+    setLoadingMore(true)
+    fetch(`/api/internal/inspections?${params.toString()}`)
+      .then((r) => r.json())
+      .then((d: { inspections: Inspection[] }) => {
+        const newList = d.inspections ?? []
+        setInspections((prev) => [...prev, ...newList])
+        setHasMore(newList.length === 100)
+      })
+      .catch(console.error)
+      .finally(() => setLoadingMore(false))
+  }, [stageFilter, datePreset, customFrom, customTo, search, inspections.length])
+
+  const counts: Record<string, number> = { all: totalCount, ...stageCounts }
 
   return (
     <div
@@ -778,14 +809,38 @@ export default function InspectionsPage() {
               No inspections match current filters.
             </div>
           ) : (
-            inspections.map((insp) => (
-              <InspectionRow
-                key={insp.id}
-                inspection={insp}
-                selected={selectedInspection?.id === insp.id}
-                onClick={() => setSelectedInspection(insp)}
-              />
-            ))
+            <>
+              {inspections.map((insp) => (
+                <InspectionRow
+                  key={insp.id}
+                  inspection={insp}
+                  selected={selectedInspection?.id === insp.id}
+                  onClick={() => setSelectedInspection(insp)}
+                />
+              ))}
+              {hasMore && (
+                <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+                  <button
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    style={{
+                      width: '100%',
+                      padding: '7px 0',
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: loadingMore ? 'default' : 'pointer',
+                      background: 'var(--bg-surface)',
+                      color: 'var(--text-secondary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 4,
+                      opacity: loadingMore ? 0.6 : 1,
+                    }}
+                  >
+                    {loadingMore ? 'Loading…' : 'Load more'}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -801,15 +856,9 @@ export default function InspectionsPage() {
             lineHeight: 1.6,
           }}
         >
-          <div>{inspections.length} inspections</div>
-          {inspections.length > 0 && (
-            <div style={{ opacity: 0.75 }}>
-              {completeCount > 0 && `${completeCount} Complete`}
-              {completeCount > 0 && newCount > 0 && ' · '}
-              {newCount > 0 && `${newCount} New`}
-              {performedCount > 0 && ` · ${performedCount} Performed`}
-            </div>
-          )}
+          <div>
+            {inspections.length} of {totalCount} inspections
+          </div>
         </div>
       </div>
 
