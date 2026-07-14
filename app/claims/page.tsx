@@ -899,7 +899,7 @@ export default function ClaimsPage() {
   // Fetch all open claims once on mount
   useEffect(() => {
     setLoadingList(true)
-    fetch('/api/claims')
+    fetch('/api/internal/claims')
       .then((r) => r.json())
       .then((data: { claims: Claim[] }) => setAllClaims(data.claims ?? []))
       .catch(console.error)
@@ -934,7 +934,7 @@ export default function ClaimsPage() {
       return
     }
     setLoadingDetail(true)
-    fetch(`/api/claims/${selectedClaim.id}`)
+    fetch(`/api/internal/claims/${selectedClaim.id}`)
       .then((r) => r.json())
       .then((data: { history: StageEvent[]; calls: CallLog[]; phone: string | null }) => {
         setHistory(data.history ?? [])
