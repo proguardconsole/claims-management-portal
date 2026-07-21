@@ -103,8 +103,34 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const claims = data ?? []
-  const closed = claims.filter((c) => c.stage !== 'Claim Denied').length
-  const denied = claims.filter((c) => c.stage === 'Claim Denied').length
+  const ids = claims.map((c) => c.id)
 
-  return NextResponse.json({ claims, total: claims.length, closed, denied })
+  const [{ data: estRows }, { data: payRows }] = await Promise.all([
+    ids.length > 0
+      ? sb.from('estimates').select('claim_id, estimate_total').in('claim_id', ids)
+      : Promise.resolve({ data: [] as { claim_id: string; estimate_total: number | null }[] }),
+    ids.length > 0
+      ? sb.from('claim_payments').select('claim_id, amount').in('claim_id', ids)
+      : Promise.resolve({ data: [] as { claim_id: string; amount: number | null }[] }),
+  ])
+
+  const estimateMap: Record<string, number> = {}
+  for (const e of estRows ?? []) {
+    if (e.claim_id) estimateMap[e.claim_id] = (estimateMap[e.claim_id] ?? 0) + (e.estimate_total ?? 0)
+  }
+  const paymentMap: Record<string, number> = {}
+  for (const p of payRows ?? []) {
+    if (p.claim_id) paymentMap[p.claim_id] = (paymentMap[p.claim_id] ?? 0) + (p.amount ?? 0)
+  }
+
+  const enriched = claims.map((c) => ({
+    ...c,
+    estimate_total: estimateMap[c.id] ?? 0,
+    payment_total: paymentMap[c.id] ?? 0,
+  }))
+
+  const closed = enriched.filter((c) => c.stage !== 'Claim Denied').length
+  const denied = enriched.filter((c) => c.stage === 'Claim Denied').length
+
+  return NextResponse.json({ claims: enriched, total: enriched.length, closed, denied })
 }

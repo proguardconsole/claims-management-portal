@@ -47,7 +47,7 @@ export async function GET(
   const claimId = params.id
   const sb = getServerSupabase()
 
-  const [historyRes, claimRes] = await Promise.all([
+  const [historyRes, claimRes, estRes, payRes] = await Promise.all([
     sb
       .from('claim_events')
       .select('stage, entered_at, days_in_stage, modified_by_name')
@@ -58,10 +58,14 @@ export async function GET(
       .select('claim_contact_phone')
       .eq('id', claimId)
       .single(),
+    sb.from('estimates').select('estimate_total').eq('claim_id', claimId),
+    sb.from('claim_payments').select('amount').eq('claim_id', claimId),
   ])
 
   const history = historyRes.data ?? []
   const phone = claimRes.data?.claim_contact_phone ?? null
+  const estimate_total = (estRes.data ?? []).reduce((s, r) => s + (r.estimate_total ?? 0), 0)
+  const payment_total = (payRes.data ?? []).reduce((s, r) => s + (r.amount ?? 0), 0)
 
   let calls: CallLog[] = []
   const septicKey = process.env.SEPTIC_GTM_SERVICE_KEY
@@ -114,5 +118,5 @@ export async function GET(
     console.warn('[claim detail] SEPTIC_GTM_SERVICE_KEY not configured — skipping call history')
   }
 
-  return NextResponse.json({ history, calls, phone })
+  return NextResponse.json({ history, calls, phone, estimate_total, payment_total })
 }

@@ -30,6 +30,8 @@ type Claim = {
   proceed_to_remediation: string | null
   claim_trigger: string | null
   description: string | null
+  estimate_total: number | null
+  payment_total: number | null
 }
 
 type StageEvent = {
@@ -370,11 +372,6 @@ function ClaimDetail({
   loading: boolean
 }) {
   const zohoUrl = `https://crm.zoho.com/crm/org884788391/tab/Deals/${claim.id}`
-  const bothFinancialNull = claim.total_claim_costs == null && claim.total_amount_paid == null
-  const totalCosts = claim.total_claim_costs ?? 0
-  const totalPaid = claim.total_amount_paid ?? 0
-  const outstanding = totalCosts - totalPaid
-
   return (
     <div style={{ padding: 24, maxWidth: 780 }}>
       {/* A — Header */}
@@ -514,32 +511,27 @@ function ClaimDetail({
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          gridTemplateColumns: 'repeat(2, 1fr)',
           gap: 10,
           marginBottom: 14,
         }}
       >
-        {[
-          {
-            label: 'Total Costs',
-            value: formatCurrency(claim.total_claim_costs),
-            color: 'var(--text-primary)',
-          },
-          {
-            label: 'Total Paid',
-            value: formatCurrency(claim.total_amount_paid),
-            color: 'var(--accent-green)',
-          },
-          {
-            label: 'Outstanding',
-            value: bothFinancialNull ? '—' : formatCurrency(outstanding > 0 ? outstanding : 0),
-            color: bothFinancialNull
-              ? 'var(--text-tertiary)'
-              : outstanding > 0
-                ? 'var(--accent-red)'
-                : 'var(--accent-green)',
-          },
-        ].map(({ label, value, color }) => (
+        {(() => {
+          const est = claim.estimate_total ?? 0
+          const paid = claim.payment_total ?? 0
+          return [
+            {
+              label: 'Estimate',
+              value: formatCurrency(est),
+              color: 'var(--text-primary)',
+            },
+            {
+              label: 'Paid to Date',
+              value: formatCurrency(paid),
+              color: paid >= est ? 'var(--accent-amber)' : 'var(--accent-green)',
+            },
+          ]
+        })().map(({ label, value, color }) => (
           <div
             key={label}
             style={{

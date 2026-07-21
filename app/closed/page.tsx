@@ -28,6 +28,8 @@ type ClosedClaim = {
   account_name: string | null
   description: string | null
   claim_trigger: string | null
+  estimate_total: number | null
+  payment_total: number | null
 }
 
 type StageEvent = {
@@ -49,6 +51,14 @@ function formatDate(isoStr: string | null): string {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
+  })
+}
+
+function formatCurrency(n: number | null): string {
+  return (n ?? 0).toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
   })
 }
 
@@ -473,6 +483,84 @@ function ClaimDetail({
           </div>
         </div>
       )}
+
+      {/* B.1 — Financial summary */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 10,
+          marginBottom: 14,
+        }}
+      >
+        {(() => {
+          const est = claim.estimate_total ?? 0
+          const paid = claim.payment_total ?? 0
+          const diff = paid - est
+          return [
+            {
+              label: 'Original Estimate',
+              value: formatCurrency(est),
+              color: 'var(--text-primary)',
+            },
+            {
+              label: 'Total Paid',
+              value: formatCurrency(paid),
+              color: 'var(--accent-green)',
+            },
+            {
+              label: 'Difference',
+              value:
+                est === 0 && paid === 0
+                  ? '—'
+                  : diff === 0
+                    ? '$0'
+                    : diff < 0
+                      ? `-${formatCurrency(-diff)}`
+                      : `+${formatCurrency(diff)}`,
+              color:
+                est === 0 && paid === 0
+                  ? 'var(--text-tertiary)'
+                  : diff < 0
+                    ? 'var(--accent-green)'
+                    : 'var(--accent-red)',
+            },
+          ]
+        })().map(({ label, value, color }) => (
+          <div
+            key={label}
+            style={{
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              padding: '12px 16px',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: 'var(--text-tertiary)',
+                marginBottom: 4,
+              }}
+            >
+              {label}
+            </div>
+            <div
+              style={{
+                fontSize: 19,
+                fontWeight: 700,
+                fontVariantNumeric: 'tabular-nums',
+                color,
+              }}
+            >
+              {value}
+            </div>
+          </div>
+        ))}
+      </div>
 
       {/* C — Info grid */}
       <div
