@@ -2,17 +2,20 @@ import { NextRequest, NextResponse } from 'next/server'
 
 // ── system prompt ──────────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are a claims operations analyst writing a weekly digest summary for the leadership team at ProGuard Environmental, an environmental insurance services company managing AST (above-ground storage tank) and UST (underground storage tank) claims.
+function buildSystemPrompt(periodLabel: string): string {
+  const lower = periodLabel.toLowerCase()
+  return `You are a claims operations analyst writing a ${lower} digest summary for the leadership team at ProGuard Environmental, an environmental insurance services company managing AST (above-ground storage tank) and UST (underground storage tank) claims.
 
-You will receive a JSON payload containing this week's claims data. Write exactly 3 short paragraphs:
+You will receive a JSON payload containing this ${lower}'s claims data. Write exactly 3 short paragraphs:
 
-Paragraph 1 — Pipeline health: Summarize the overall state of open claims, the stale rate, and how AST and UST pipelines compare this week. Mention week-over-week movement if notable.
+Paragraph 1 — Pipeline health: Summarize the overall state of open claims, the stale rate, and how AST and UST pipelines compare this ${lower}. Mention period-over-period movement if notable.
 
 Paragraph 2 — Biggest concern: Identify the single most critical issue visible in the data — the worst bottleneck stage, the highest-stale agent, claims past 60 days, or financial collection gaps. Be specific: name stages, numbers, and agent names where relevant.
 
-Paragraph 3 — Recommended action: Give one concrete, actionable recommendation for leadership to address this week. Be direct. Do not hedge.
+Paragraph 3 — Recommended action: Give one concrete, actionable recommendation for leadership to address. Be direct. Do not hedge.
 
 Tone: Direct, factual, executive-level. No bullet points. No headers. No markdown. Plain prose only. Each paragraph 2-4 sentences maximum.`
+}
 
 // ── route handler ──────────────────────────────────────────────────────────────
 
@@ -22,6 +25,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!authHeader || authHeader !== expected) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  const period = req.nextUrl.searchParams.get('period') ?? 'week'
 
   // ── Step 1: resolve base URL and fetch digest payload ─────────────────────
 
@@ -37,8 +42,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     })()
 
   let digestPayload: unknown
+  let periodLabel = 'Weekly'
   try {
-    const digestRes = await fetch(`${appUrl}/api/digest`, {
+    const digestRes = await fetch(`${appUrl}/api/digest?period=${period}`, {
       headers: { Authorization: expected },
     })
     if (!digestRes.ok) {
@@ -46,6 +52,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       throw new Error(body.error ?? `Digest fetch failed: HTTP ${digestRes.status}`)
     }
     digestPayload = await digestRes.json()
+    const meta = (digestPayload as { meta?: { period_label?: string } }).meta
+    if (meta?.period_label) periodLabel = meta.period_label
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: `Failed to fetch digest: ${message}` }, { status: 500 })
@@ -75,7 +83,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 600,
-        system: SYSTEM_PROMPT,
+        system: buildSystemPrompt(periodLabel),
         messages: [
           {
             role: 'user',

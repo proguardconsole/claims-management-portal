@@ -8,6 +8,9 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24
 const CLOSED_STAGES_TUPLE = '("Complete","Completed","Claim Denied")'
 const CLOSED_STAGES_ARRAY = ['Complete', 'Completed', 'Claim Denied']
 
+const VALID_PERIODS = ['week', 'month', 'quarter', 'year'] as const
+type Period = typeof VALID_PERIODS[number]
+
 // ── helpers ────────────────────────────────────────────────────────────────────
 
 function normalizePipeline(tankType: string | null | undefined): string {
@@ -20,27 +23,41 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10
 }
 
-// Returns the most recent Monday at 00:00:00 UTC and derived boundaries.
-function weekBoundaries() {
+function periodBoundaries(period: Period) {
   const now = new Date()
-  const dow = now.getUTCDay() // 0 = Sun
-  const toMonday = dow === 0 ? -6 : 1 - dow
+  const end = new Date(now)
+  end.setHours(23, 59, 59, 999)
 
-  const weekStart = new Date(now)
-  weekStart.setUTCDate(weekStart.getUTCDate() + toMonday)
-  weekStart.setUTCHours(0, 0, 0, 0)
+  let start: Date
+  let label: string
+  let prevStart: Date
 
-  const weekEnd = new Date(weekStart)
-  weekEnd.setUTCDate(weekEnd.getUTCDate() + 6)
-  weekEnd.setUTCHours(23, 59, 59, 999)
+  if (period === 'month') {
+    start     = new Date(now.getFullYear(), now.getMonth(), 1)
+    prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    label     = 'Monthly'
+  } else if (period === 'quarter') {
+    const q   = Math.floor(now.getMonth() / 3)
+    start     = new Date(now.getFullYear(), q * 3, 1)
+    prevStart = new Date(now.getFullYear(), q * 3 - 3, 1)
+    label     = 'Quarterly'
+  } else if (period === 'year') {
+    start     = new Date(now.getFullYear(), 0, 1)
+    prevStart = new Date(now.getFullYear() - 1, 0, 1)
+    label     = 'Annual'
+  } else {
+    // week (default) — UTC Monday alignment
+    const dow  = now.getUTCDay()
+    const diff = dow === 0 ? -6 : 1 - dow
+    start      = new Date(now)
+    start.setUTCDate(start.getUTCDate() + diff)
+    start.setUTCHours(0, 0, 0, 0)
+    prevStart  = new Date(start)
+    prevStart.setUTCDate(prevStart.getUTCDate() - 7)
+    label      = 'Weekly'
+  }
 
-  const lastWeekStart = new Date(weekStart)
-  lastWeekStart.setUTCDate(lastWeekStart.getUTCDate() - 7)
-
-  const lastWeekEnd = new Date(weekEnd)
-  lastWeekEnd.setUTCDate(lastWeekEnd.getUTCDate() - 7)
-
-  return { weekStart, weekEnd, lastWeekStart, lastWeekEnd }
+  return { start, end, prevStart, label }
 }
 
 type SB = ReturnType<typeof getServerSupabase>
@@ -54,22 +71,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const periodParam = req.nextUrl.searchParams.get('period') ?? 'week'
+  const period: Period = (VALID_PERIODS as readonly string[]).includes(periodParam)
+    ? (periodParam as Period)
+    : 'week'
+
   try {
     const sb: SB = getServerSupabase()
-    const { weekStart, weekEnd, lastWeekStart } = weekBoundaries()
-    const now = Date.now()
+    const { start, end, prevStart, label: periodLabel } = periodBoundaries(period)
+    const nowMs = Date.now()
 
     const yearStart = new Date(Date.UTC(new Date().getUTCFullYear(), 0, 1))
-    const monthStart = new Date()
-    monthStart.setUTCDate(1)
-    monthStart.setUTCHours(0, 0, 0, 0)
 
     // ── 11 parallel queries ───────────────────────────────────────────────────
 
     const [
       openClaimsRes,
-      openedThisWeekRes,
-      openedLastWeekRes,
+      openedThisPeriodRes,
+      openedPrevPeriodRes,
       allClaimsPipelineRes,
       closedEventsRes,
       allEventsRes,
@@ -87,32 +106,32 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .not('stage', 'in', CLOSED_STAGES_TUPLE)
         .not('modified_time', 'is', null),
 
-      // 2. Opened this week
+      // 2. Opened this period
       sb
         .from('claims')
         .select('tank_type')
         .eq('record_type', 'Claim')
-        .gte('created_time', weekStart.toISOString()),
+        .gte('created_time', start.toISOString()),
 
-      // 3. Opened last week
+      // 3. Opened previous period
       sb
         .from('claims')
         .select('tank_type')
         .eq('record_type', 'Claim')
-        .gte('created_time', lastWeekStart.toISOString())
-        .lt('created_time', weekStart.toISOString()),
+        .gte('created_time', prevStart.toISOString())
+        .lt('created_time', start.toISOString()),
 
       // 4. All claims — pipeline lookup for financial and closed-event joins
       sb
         .from('claims')
         .select('id, tank_type'),
 
-      // 5. Closed events this week + last week (split in JS at weekStart)
+      // 5. Closed events this period + prev period (split in JS at start)
       sb
         .from('claim_events')
         .select('claim_id, entered_at')
         .in('stage', CLOSED_STAGES_ARRAY)
-        .gte('entered_at', lastWeekStart.toISOString())
+        .gte('entered_at', prevStart.toISOString())
         .not('entered_at', 'is', null),
 
       // 6. All events — for bottleneck stage-entered lookup
@@ -133,7 +152,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .select('claim_id, amount')
         .not('claim_id', 'is', null),
 
-      // 9. YTD closed claims — denial rate + denied this month
+      // 9. YTD closed claims — denial rate + denied this period
       sb
         .from('claims')
         .select('stage, modified_time')
@@ -158,17 +177,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ])
 
     // Error checks
-    if (openClaimsRes.error)      throw new Error(`openClaims: ${openClaimsRes.error.message}`)
-    if (openedThisWeekRes.error)  throw new Error(`openedThisWeek: ${openedThisWeekRes.error.message}`)
-    if (openedLastWeekRes.error)  throw new Error(`openedLastWeek: ${openedLastWeekRes.error.message}`)
+    if (openClaimsRes.error)        throw new Error(`openClaims: ${openClaimsRes.error.message}`)
+    if (openedThisPeriodRes.error)  throw new Error(`openedThisPeriod: ${openedThisPeriodRes.error.message}`)
+    if (openedPrevPeriodRes.error)  throw new Error(`openedPrevPeriod: ${openedPrevPeriodRes.error.message}`)
     if (allClaimsPipelineRes.error) throw new Error(`allClaimsPipeline: ${allClaimsPipelineRes.error.message}`)
-    if (closedEventsRes.error)    throw new Error(`closedEvents: ${closedEventsRes.error.message}`)
-    if (allEventsRes.error)       throw new Error(`allEvents: ${allEventsRes.error.message}`)
-    if (estimatesRes.error)       throw new Error(`estimates: ${estimatesRes.error.message}`)
-    if (paymentsRes.error)        throw new Error(`payments: ${paymentsRes.error.message}`)
-    if (ytdClosedRes.error)       throw new Error(`ytdClosed: ${ytdClosedRes.error.message}`)
-    if (denialReasonsRes.error)   throw new Error(`denialReasons: ${denialReasonsRes.error.message}`)
-    if (lastSyncedRes.error)      throw new Error(`lastSynced: ${lastSyncedRes.error.message}`)
+    if (closedEventsRes.error)      throw new Error(`closedEvents: ${closedEventsRes.error.message}`)
+    if (allEventsRes.error)         throw new Error(`allEvents: ${allEventsRes.error.message}`)
+    if (estimatesRes.error)         throw new Error(`estimates: ${estimatesRes.error.message}`)
+    if (paymentsRes.error)          throw new Error(`payments: ${paymentsRes.error.message}`)
+    if (ytdClosedRes.error)         throw new Error(`ytdClosed: ${ytdClosedRes.error.message}`)
+    if (denialReasonsRes.error)     throw new Error(`denialReasons: ${denialReasonsRes.error.message}`)
+    if (lastSyncedRes.error)        throw new Error(`lastSynced: ${lastSyncedRes.error.message}`)
 
     // ── Pipeline lookup from ALL claims ───────────────────────────────────────
 
@@ -205,8 +224,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
     const agentAgg: Record<string, AgentAgg> = {}
 
-    const astData = { open: 0, stale_count: 0, opened_this_week: 0, closed_this_week: 0 }
-    const ustData = { open: 0, stale_count: 0, opened_this_week: 0, closed_this_week: 0 }
+    const astData = { open: 0, stale_count: 0, opened_this_period: 0, closed_this_period: 0 }
+    const ustData = { open: 0, stale_count: 0, opened_this_period: 0, closed_this_period: 0 }
 
     // Build stage-entered lookup for bottleneck (uses allEventsRes)
     const latestEntered: Record<string, string> = {}
@@ -221,33 +240,33 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     for (const claim of openClaims) {
       totalOpen++
-      const days = (now - new Date(claim.modified_time as string).getTime()) / MS_PER_DAY
+      const days = (nowMs - new Date(claim.modified_time as string).getTime()) / MS_PER_DAY
       const pipeline = normalizePipeline(claim.tank_type)
 
       if (days > 14) staleCount++
-      if (days > 21) staleCount7dAgo++ // was stale 7 days ago
+      if (days > 21) staleCount7dAgo++
 
       if (days > 60) {
         stale60d.push({
-          claim_id: claim.id,
-          fsn: (claim.field_service_number as string | null) ?? (claim.deal_name as string | null) ?? claim.id,
+          claim_id:   claim.id,
+          fsn:        (claim.field_service_number as string | null) ?? (claim.deal_name as string | null) ?? claim.id,
           owner_name: (claim.owner_name as string | null) ?? '',
-          stage: claim.stage as string,
+          stage:      claim.stage as string,
           days_stale: round1(days),
-          tank_type: (claim.tank_type as string | null) ?? '',
-          zoho_id: claim.id,
+          tank_type:  (claim.tank_type as string | null) ?? '',
+          zoho_id:    claim.id,
         })
       }
 
       if (claim.emergency === true) {
         emergencyItems.push({
-          claim_id: claim.id,
-          fsn: (claim.field_service_number as string | null) ?? (claim.deal_name as string | null) ?? claim.id,
+          claim_id:   claim.id,
+          fsn:        (claim.field_service_number as string | null) ?? (claim.deal_name as string | null) ?? claim.id,
           owner_name: (claim.owner_name as string | null) ?? '',
-          stage: claim.stage as string,
+          stage:      claim.stage as string,
           days_stale: round1(days),
-          tank_type: (claim.tank_type as string | null) ?? '',
-          zoho_id: claim.id,
+          tank_type:  (claim.tank_type as string | null) ?? '',
+          zoho_id:    claim.id,
         })
       }
 
@@ -270,9 +289,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       // Bottleneck bucket
       if (claim.stage) {
-        const bnKey = `${claim.stage}||${pipeline}`
+        const bnKey    = `${claim.stage}||${pipeline}`
         const enteredAt = latestEntered[`${claim.id}||${claim.stage}`] ?? (claim.modified_time as string)
-        const bnDays = enteredAt ? (now - new Date(enteredAt).getTime()) / MS_PER_DAY : 0
+        const bnDays   = enteredAt ? (nowMs - new Date(enteredAt).getTime()) / MS_PER_DAY : 0
         if (!bnAgg[bnKey]) bnAgg[bnKey] = { days: [], pipeline }
         bnAgg[bnKey].days.push(bnDays)
       }
@@ -288,77 +307,75 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .map((name) => {
         const a = agentAgg[name]
         return {
-          agent_name: name,
-          total_open: a.total_open,
-          stale_count: a.stale_count,
-          stale_pct: Math.round((a.stale_count / a.total_open) * 100),
+          agent_name:       name,
+          total_open:       a.total_open,
+          stale_count:      a.stale_count,
+          stale_pct:        Math.round((a.stale_count / a.total_open) * 100),
           oldest_claim_days: round1(a.oldest_days),
-          ast_open: a.ast_open,
-          ust_open: a.ust_open,
+          ast_open:         a.ast_open,
+          ust_open:         a.ust_open,
         }
       })
       .sort((a, b) => b.stale_count - a.stale_count || b.total_open - a.total_open)
 
     // ── OPENED / CLOSED VOLUME ────────────────────────────────────────────────
 
-    const openedThisWeekClaims = openedThisWeekRes.data ?? []
-    const openedThisWeek = openedThisWeekClaims.length
-    for (const c of openedThisWeekClaims) {
-      if (c.tank_type === 'AST') astData.opened_this_week++
-      if (c.tank_type === 'UST') ustData.opened_this_week++
+    const openedThisPeriodClaims = openedThisPeriodRes.data ?? []
+    const openedThisPeriod = openedThisPeriodClaims.length
+    for (const c of openedThisPeriodClaims) {
+      if (c.tank_type === 'AST') astData.opened_this_period++
+      if (c.tank_type === 'UST') ustData.opened_this_period++
     }
 
-    const openedLastWeekClaims = openedLastWeekRes.data ?? []
-    const openedLastWeek = openedLastWeekClaims.length
-    let astOpenedLastWeek = 0
-    let ustOpenedLastWeek = 0
-    for (const c of openedLastWeekClaims) {
-      if (c.tank_type === 'AST') astOpenedLastWeek++
-      if (c.tank_type === 'UST') ustOpenedLastWeek++
+    const openedPrevPeriodClaims = openedPrevPeriodRes.data ?? []
+    const openedPrevPeriod = openedPrevPeriodClaims.length
+    let astOpenedPrevPeriod = 0
+    let ustOpenedPrevPeriod = 0
+    for (const c of openedPrevPeriodClaims) {
+      if (c.tank_type === 'AST') astOpenedPrevPeriod++
+      if (c.tank_type === 'UST') ustOpenedPrevPeriod++
     }
 
-    // Split closed events into this-week and last-week buckets
-    const weekStartISO = weekStart.toISOString()
-    const closedThisWeekSet: Record<string, true> = {}
-    const closedLastWeekSet: Record<string, true> = {}
-    const astClosedThisWeekSet: Record<string, true> = {}
-    const ustClosedThisWeekSet: Record<string, true> = {}
+    // Split closed events into this-period and prev-period buckets
+    const startISO = start.toISOString()
+    const closedThisPeriodSet: Record<string, true> = {}
+    const closedPrevPeriodSet: Record<string, true> = {}
+    const astClosedThisPeriodSet: Record<string, true> = {}
+    const ustClosedThisPeriodSet: Record<string, true> = {}
 
     for (const ev of closedEventsRes.data ?? []) {
-      if ((ev.entered_at as string) >= weekStartISO) {
-        closedThisWeekSet[ev.claim_id as string] = true
-        const pipeline = pipelineByClaimId[ev.claim_id as string]
-        if (pipeline === 'AST') astClosedThisWeekSet[ev.claim_id as string] = true
-        if (pipeline === 'UST') ustClosedThisWeekSet[ev.claim_id as string] = true
+      if ((ev.entered_at as string) >= startISO) {
+        closedThisPeriodSet[ev.claim_id as string] = true
+        const pl = pipelineByClaimId[ev.claim_id as string]
+        if (pl === 'AST') astClosedThisPeriodSet[ev.claim_id as string] = true
+        if (pl === 'UST') ustClosedThisPeriodSet[ev.claim_id as string] = true
       } else {
-        closedLastWeekSet[ev.claim_id as string] = true
+        closedPrevPeriodSet[ev.claim_id as string] = true
       }
     }
 
-    const closedThisWeek = Object.keys(closedThisWeekSet).length
-    const closedLastWeek = Object.keys(closedLastWeekSet).length
-    astData.closed_this_week = Object.keys(astClosedThisWeekSet).length
-    ustData.closed_this_week = Object.keys(ustClosedThisWeekSet).length
+    const closedThisPeriod = Object.keys(closedThisPeriodSet).length
+    const closedPrevPeriod = Object.keys(closedPrevPeriodSet).length
+    astData.closed_this_period = Object.keys(astClosedThisPeriodSet).length
+    ustData.closed_this_period = Object.keys(ustClosedThisPeriodSet).length
 
-    // Per-pipeline last-week closes (for wow_open_delta)
-    let astClosedLastWeek = 0
-    let ustClosedLastWeek = 0
-    for (const claimId of Object.keys(closedLastWeekSet)) {
-      const pipeline = pipelineByClaimId[claimId]
-      if (pipeline === 'AST') astClosedLastWeek++
-      if (pipeline === 'UST') ustClosedLastWeek++
+    // Per-pipeline prev-period closes (for pop_open_delta)
+    let astClosedPrevPeriod = 0
+    let ustClosedPrevPeriod = 0
+    for (const claimId of Object.keys(closedPrevPeriodSet)) {
+      const pl = pipelineByClaimId[claimId]
+      if (pl === 'AST') astClosedPrevPeriod++
+      if (pl === 'UST') ustClosedPrevPeriod++
     }
 
-    // ── WOW ──────────────────────────────────────────────────────────────────
+    // ── PERIOD-OVER-PERIOD DELTAS ─────────────────────────────────────────────
 
-    // open_total_delta: proxy = current + last_week_closes - last_week_opens
-    // delta = current - proxy = last_week_opens - last_week_closes
-    const wowOpenedDelta    = openedThisWeek - openedLastWeek
-    const wowClosedDelta    = closedThisWeek - closedLastWeek
-    const wowOpenTotalDelta = openedLastWeek - closedLastWeek
-    const wowStaleRateDelta = round1(staleRatePct - staleRate7dAgo)
-    const astWowOpenDelta   = astOpenedLastWeek - astClosedLastWeek
-    const ustWowOpenDelta   = ustOpenedLastWeek - ustClosedLastWeek
+    const popOpenedDelta    = openedThisPeriod - openedPrevPeriod
+    const popClosedDelta    = closedThisPeriod - closedPrevPeriod
+    const popOpenTotalDelta = openedPrevPeriod - closedPrevPeriod
+    const popStaleRateDelta = round1(staleRatePct - staleRate7dAgo)
+    const astPopOpenDelta   = astOpenedPrevPeriod - astClosedPrevPeriod
+    const ustPopOpenDelta   = ustOpenedPrevPeriod - ustClosedPrevPeriod
 
     // ── BOTTLENECK (top 3) ────────────────────────────────────────────────────
 
@@ -386,16 +403,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const pipeline = pipelineByClaimId[e.claim_id ?? ''] ?? 'Other'
       if (!estByPipeline[pipeline]) {
         estByPipeline[pipeline] = {
-          total_estimated: 0,
+          total_estimated:        0,
           total_contractor_costs: 0,
-          total_state_fees: 0,
-          total_adjuster_fees: 0,
+          total_state_fees:       0,
+          total_adjuster_fees:    0,
         }
       }
-      estByPipeline[pipeline].total_estimated       += (e.estimate_total     as number) ?? 0
+      estByPipeline[pipeline].total_estimated        += (e.estimate_total    as number) ?? 0
       estByPipeline[pipeline].total_contractor_costs += (e.contractor_costs  as number) ?? 0
-      estByPipeline[pipeline].total_state_fees      += (e.state_fees         as number) ?? 0
-      estByPipeline[pipeline].total_adjuster_fees   += (e.adjuster_fees      as number) ?? 0
+      estByPipeline[pipeline].total_state_fees       += (e.state_fees        as number) ?? 0
+      estByPipeline[pipeline].total_adjuster_fees    += (e.adjuster_fees     as number) ?? 0
     }
 
     const pmtByPipeline: Record<string, number> = {}
@@ -412,7 +429,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const stateFees       = Object.values(estByPipeline).reduce((s, e) => s + e.total_state_fees, 0)
     const adjusterFees    = Object.values(estByPipeline).reduce((s, e) => s + e.total_adjuster_fees, 0)
 
-    // Avoid Set spread — use Record pattern for unique pipeline keys
     const pipelineUnion: Record<string, true> = {}
     for (const p of Object.keys(estByPipeline)) pipelineUnion[p] = true
     for (const p of Object.keys(pmtByPipeline)) pipelineUnion[p] = true
@@ -420,7 +436,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const byPipeline = Object.keys(pipelineUnion)
       .filter((p) => p === 'AST' || p === 'UST')
       .map((p) => ({
-        pipeline: p,
+        pipeline:  p,
         estimated: round1(estByPipeline[p]?.total_estimated ?? 0),
         collected: round1(pmtByPipeline[p] ?? 0),
       }))
@@ -428,14 +444,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     // ── DENIALS ───────────────────────────────────────────────────────────────
 
-    const ytdClosed   = ytdClosedRes.data ?? []
-    const ytdTotal    = ytdClosed.length
-    const ytdDenied   = ytdClosed.filter((c) => c.stage === 'Claim Denied').length
+    const ytdClosed     = ytdClosedRes.data ?? []
+    const ytdTotal      = ytdClosed.length
+    const ytdDenied     = ytdClosed.filter((c) => c.stage === 'Claim Denied').length
     const ytdDenialRate = ytdTotal > 0 ? round1((ytdDenied / ytdTotal) * 100) : 0
 
-    const monthStartISO = monthStart.toISOString()
-    const deniedThisMonth = ytdClosed.filter(
-      (c) => c.stage === 'Claim Denied' && (c.modified_time as string) >= monthStartISO,
+    const deniedThisPeriod = ytdClosed.filter(
+      (c) => c.stage === 'Claim Denied' && (c.modified_time as string) >= startISO,
     ).length
 
     const reasonAgg: Record<string, number> = {}
@@ -454,46 +469,48 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       meta: {
         generated_at:   new Date().toISOString(),
-        week_start:     weekStart.toISOString(),
-        week_end:       weekEnd.toISOString(),
+        period,
+        period_label:   periodLabel,
+        period_start:   start.toISOString(),
+        period_end:     end.toISOString(),
         last_synced_at: lastSyncedAt,
       },
       snapshot: {
         total_open:          totalOpen,
-        opened_this_week:    openedThisWeek,
-        closed_this_week:    closedThisWeek,
+        opened_this_period:  openedThisPeriod,
+        closed_this_period:  closedThisPeriod,
         stale_rate_pct:      staleRatePct,
         total_estimated:     round1(totalEstimated),
         collection_rate_pct: collectionRate,
       },
-      wow: {
-        opened_delta:      wowOpenedDelta,
-        closed_delta:      wowClosedDelta,
-        open_total_delta:  wowOpenTotalDelta,
-        stale_rate_delta:  wowStaleRateDelta,
+      pop: {
+        opened_delta:      popOpenedDelta,
+        closed_delta:      popClosedDelta,
+        open_total_delta:  popOpenTotalDelta,
+        stale_rate_delta:  popStaleRateDelta,
       },
       pipelines: {
         ast: {
-          open:              astData.open,
-          opened_this_week:  astData.opened_this_week,
-          closed_this_week:  astData.closed_this_week,
-          stale_count:       astData.stale_count,
-          stale_rate_pct:    astData.open > 0 ? round1((astData.stale_count / astData.open) * 100) : 0,
-          wow_open_delta:    astWowOpenDelta,
+          open:               astData.open,
+          opened_this_period: astData.opened_this_period,
+          closed_this_period: astData.closed_this_period,
+          stale_count:        astData.stale_count,
+          stale_rate_pct:     astData.open > 0 ? round1((astData.stale_count / astData.open) * 100) : 0,
+          pop_open_delta:     astPopOpenDelta,
         },
         ust: {
-          open:              ustData.open,
-          opened_this_week:  ustData.opened_this_week,
-          closed_this_week:  ustData.closed_this_week,
-          stale_count:       ustData.stale_count,
-          stale_rate_pct:    ustData.open > 0 ? round1((ustData.stale_count / ustData.open) * 100) : 0,
-          wow_open_delta:    ustWowOpenDelta,
+          open:               ustData.open,
+          opened_this_period: ustData.opened_this_period,
+          closed_this_period: ustData.closed_this_period,
+          stale_count:        ustData.stale_count,
+          stale_rate_pct:     ustData.open > 0 ? round1((ustData.stale_count / ustData.open) * 100) : 0,
+          pop_open_delta:     ustPopOpenDelta,
         },
       },
       bottlenecks,
       attention: {
-        stale_60d:  stale60d,
-        emergency:  emergencyItems,
+        stale_60d: stale60d,
+        emergency: emergencyItems,
       },
       agents,
       financial: {
@@ -506,8 +523,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         by_pipeline:         byPipeline,
       },
       denials: {
-        denied_this_month:    deniedThisMonth,
-        ytd_denial_rate_pct:  ytdDenialRate,
+        denied_this_period:  deniedThisPeriod,
+        ytd_denial_rate_pct: ytdDenialRate,
         reasons,
       },
     })

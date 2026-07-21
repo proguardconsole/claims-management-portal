@@ -45,19 +45,21 @@ type DenialReason = {
 type DigestPayload = {
   meta: {
     generated_at: string
-    week_start: string
-    week_end: string
+    period: string
+    period_label: string
+    period_start: string
+    period_end: string
     last_synced_at: string | null
   }
   snapshot: {
     total_open: number
-    opened_this_week: number
-    closed_this_week: number
+    opened_this_period: number
+    closed_this_period: number
     stale_rate_pct: number
     total_estimated: number
     collection_rate_pct: number
   }
-  wow: {
+  pop: {
     opened_delta: number
     closed_delta: number
     open_total_delta: number
@@ -66,19 +68,19 @@ type DigestPayload = {
   pipelines: {
     ast: {
       open: number
-      opened_this_week: number
-      closed_this_week: number
+      opened_this_period: number
+      closed_this_period: number
       stale_count: number
       stale_rate_pct: number
-      wow_open_delta: number
+      pop_open_delta: number
     }
     ust: {
       open: number
-      opened_this_week: number
-      closed_this_week: number
+      opened_this_period: number
+      closed_this_period: number
       stale_count: number
       stale_rate_pct: number
-      wow_open_delta: number
+      pop_open_delta: number
     }
   }
   bottlenecks: BottleneckItem[]
@@ -97,7 +99,7 @@ type DigestPayload = {
     by_pipeline: ByPipelineRow[]
   }
   denials: {
-    denied_this_month: number
+    denied_this_period: number
     ytd_denial_rate_pct: number
     reasons: DenialReason[]
   }
@@ -147,14 +149,20 @@ function bnBarColor(avgDays: number): string {
   return 'transparent'
 }
 
-function formatWeekStart(iso: string): string {
+function formatPeriodDate(period: string, iso: string): string {
   const d = new Date(iso)
+  if (period === 'month') {
+    return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+  }
+  if (period === 'quarter') {
+    const q = Math.floor(d.getUTCMonth() / 3) + 1
+    return `Q${q} ${d.getUTCFullYear()}`
+  }
+  if (period === 'year') {
+    return String(d.getUTCFullYear())
+  }
   return d.toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: 'UTC',
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
   })
 }
 
@@ -371,8 +379,9 @@ function DigestSkeleton() {
 
 // ─── section 3: executive snapshot ────────────────────────────────────────────
 
-function SnapshotSection({ data }: { data: DigestPayload }) {
-  const { snapshot, wow, financial } = data
+function SnapshotSection({ data, periodLabel }: { data: DigestPayload; periodLabel: string }) {
+  const { snapshot, pop, financial } = data
+  const pl = periodLabel.toLowerCase()
 
   type TileDef = {
     label: string
@@ -385,22 +394,22 @@ function SnapshotSection({ data }: { data: DigestPayload }) {
     {
       label: 'Total open',
       value: String(snapshot.total_open),
-      delta: <DeltaBadge delta={wow.open_total_delta} positiveIsBad={true} />,
+      delta: <DeltaBadge delta={pop.open_total_delta} positiveIsBad={true} />,
     },
     {
-      label: 'Opened this week',
-      value: String(snapshot.opened_this_week),
-      delta: <DeltaBadge delta={wow.opened_delta} positiveIsBad={true} />,
+      label: `Opened this ${pl}`,
+      value: String(snapshot.opened_this_period),
+      delta: <DeltaBadge delta={pop.opened_delta} positiveIsBad={true} />,
     },
     {
-      label: 'Closed this week',
-      value: String(snapshot.closed_this_week),
-      delta: <DeltaBadge delta={wow.closed_delta} positiveIsBad={false} />,
+      label: `Closed this ${pl}`,
+      value: String(snapshot.closed_this_period),
+      delta: <DeltaBadge delta={pop.closed_delta} positiveIsBad={false} />,
     },
     {
       label: 'Stale rate',
       value: `${snapshot.stale_rate_pct}%`,
-      delta: <DeltaBadgePct delta={wow.stale_rate_delta} positiveIsBad={true} />,
+      delta: <DeltaBadgePct delta={pop.stale_rate_delta} positiveIsBad={true} />,
     },
     {
       label: 'Total estimated',
@@ -540,10 +549,10 @@ function PipelineCard({
       <PipelineMetricRow
         label="Open claims"
         value={String(p.open)}
-        delta={<DeltaBadge delta={p.wow_open_delta} positiveIsBad={true} />}
+        delta={<DeltaBadge delta={p.pop_open_delta} positiveIsBad={true} />}
       />
-      <PipelineMetricRow label="Opened" value={String(p.opened_this_week)} />
-      <PipelineMetricRow label="Closed" value={String(p.closed_this_week)} />
+      <PipelineMetricRow label="Opened" value={String(p.opened_this_period)} />
+      <PipelineMetricRow label="Closed" value={String(p.closed_this_period)} />
       <div
         style={{
           display: 'flex',
@@ -561,9 +570,9 @@ function PipelineCard({
   )
 }
 
-function PipelineHealthSection({ data }: { data: DigestPayload }) {
+function PipelineHealthSection({ data, periodLabel }: { data: DigestPayload; periodLabel: string }) {
   return (
-    <SectionCard title="Pipeline health — this week">
+    <SectionCard title={`Pipeline health — this ${periodLabel.toLowerCase()}`}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <PipelineCard name="AST" p={data.pipelines.ast} />
         <PipelineCard name="UST" p={data.pipelines.ust} />
@@ -977,9 +986,9 @@ function FinancialSection({ financial }: { financial: DigestPayload['financial']
 
 // ─── section 9: denials ────────────────────────────────────────────────────────
 
-function DenialsSection({ denials }: { denials: DigestPayload['denials'] }) {
-  const { denied_this_month, ytd_denial_rate_pct, reasons } = denials
-  const noDenied = denied_this_month === 0
+function DenialsSection({ denials, periodLabel }: { denials: DigestPayload['denials']; periodLabel: string }) {
+  const { denied_this_period, ytd_denial_rate_pct, reasons } = denials
+  const noDenied = denied_this_period === 0
 
   return (
     <SectionCard title="Denial snapshot">
@@ -987,10 +996,10 @@ function DenialsSection({ denials }: { denials: DigestPayload['denials'] }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
         <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 4 }}>
-            Denied this month
+            Denied this {periodLabel.toLowerCase()}
           </div>
           <div style={{ fontSize: 22, fontWeight: 700, color: noDenied ? '#4CAF82' : '#E84A4A' }}>
-            {denied_this_month}
+            {denied_this_period}
           </div>
         </div>
         <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: 14 }}>
@@ -1028,7 +1037,7 @@ function DenialsSection({ denials }: { denials: DigestPayload['denials'] }) {
             marginBottom: reasons.length > 0 ? 16 : 0,
           }}
         >
-          ✓ No claims denied this month
+          ✓ No claims denied this {periodLabel.toLowerCase()}
         </div>
       )}
 
@@ -1072,10 +1081,12 @@ type NarrativeStatus = 'idle' | 'loading' | 'done' | 'unavailable' | 'error'
 function NarrativeSection({
   status,
   text,
+  periodLabel,
   onRetry,
 }: {
   status: NarrativeStatus
   text: string | null
+  periodLabel: string
   onRetry: () => void
 }) {
   const cardBase: React.CSSProperties = {
@@ -1086,7 +1097,7 @@ function NarrativeSection({
 
   const header = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-      <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>Weekly summary</span>
+      <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>{periodLabel} summary</span>
       <span style={{ fontSize: 14 }}>✦</span>
     </div>
   )
@@ -1188,22 +1199,28 @@ function NarrativeSection({
 
 // ─── main page ─────────────────────────────────────────────────────────────────
 
+const PERIOD_OPTIONS = [
+  { value: 'week',    label: 'Weekly' },
+  { value: 'month',   label: 'Monthly' },
+  { value: 'quarter', label: 'Quarterly' },
+  { value: 'year',    label: 'Yearly' },
+]
+
 type PageState = 'idle' | 'loading' | 'loaded' | 'error'
 
 export default function DigestPage() {
+  const [period, setPeriod] = useState<string>('week')
   const [state, setState] = useState<PageState>('idle')
   const [digest, setDigest] = useState<DigestPayload | null>(null)
   const [errorMsg, setErrorMsg] = useState<string>('')
   const [narrativeStatus, setNarrativeStatus] = useState<NarrativeStatus>('idle')
   const [narrativeText, setNarrativeText] = useState<string | null>(null)
 
-  async function fetchNarrative() {
+  async function fetchNarrativeForPeriod(p: string) {
     setNarrativeStatus('loading')
     try {
-      const res = await fetch('/api/internal/digest/narrative')
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`)
-      }
+      const res = await fetch(`/api/internal/digest/narrative?period=${p}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json() as { available: boolean; narrative?: string; message?: string }
       if (!data.available) {
         setNarrativeStatus('unavailable')
@@ -1216,13 +1233,13 @@ export default function DigestPage() {
     }
   }
 
-  async function generate() {
+  async function generateForPeriod(p: string) {
     setState('loading')
     setErrorMsg('')
     setNarrativeStatus('idle')
     setNarrativeText(null)
     try {
-      const res = await fetch('/api/internal/digest')
+      const res = await fetch(`/api/internal/digest?period=${p}`)
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string }
         throw new Error(body.error ?? `HTTP ${res.status}`)
@@ -1230,12 +1247,51 @@ export default function DigestPage() {
       const data = await res.json() as DigestPayload
       setDigest(data)
       setState('loaded')
-      void fetchNarrative()
+      void fetchNarrativeForPeriod(p)
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err))
       setState('error')
     }
   }
+
+  function generate() {
+    void generateForPeriod(period)
+  }
+
+  function handlePeriodChange(newPeriod: string) {
+    setPeriod(newPeriod)
+    if (state === 'loaded' || state === 'error') {
+      void generateForPeriod(newPeriod)
+    }
+  }
+
+  const periodDisplayName = PERIOD_OPTIONS.find((o) => o.value === period)?.label ?? 'Weekly'
+
+  const PeriodSelector = (
+    <div style={{ display: 'flex', gap: 4 }}>
+      {PERIOD_OPTIONS.map((opt) => {
+        const active = period === opt.value
+        return (
+          <button
+            key={opt.value}
+            onClick={() => handlePeriodChange(opt.value)}
+            style={{
+              padding: '5px 13px',
+              fontSize: 12,
+              fontWeight: active ? 600 : 400,
+              borderRadius: 20,
+              border: active ? 'none' : '1px solid var(--border)',
+              background: active ? '#E8C84A' : 'transparent',
+              color: active ? '#111' : 'var(--text-secondary)',
+              cursor: 'pointer',
+            }}
+          >
+            {opt.label}
+          </button>
+        )
+      })}
+    </div>
+  )
 
   // ── idle: centered generate screen ──────────────────────────────────────────
 
@@ -1253,8 +1309,9 @@ export default function DigestPage() {
           textAlign: 'center',
         }}
       >
-        <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>
-          Weekly Claims Digest
+        {PeriodSelector}
+        <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-primary)', marginTop: 4 }}>
+          {periodDisplayName} Claims Digest
         </div>
         <div style={{ fontSize: 14, color: 'var(--text-tertiary)', maxWidth: 360 }}>
           Compiled from live Supabase data across all pipelines
@@ -1273,7 +1330,7 @@ export default function DigestPage() {
             cursor: 'pointer',
           }}
         >
-          Generate this week&apos;s digest
+          Generate {periodDisplayName.toLowerCase()} digest
         </button>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Takes ~2 seconds to compile</div>
       </div>
@@ -1295,6 +1352,7 @@ export default function DigestPage() {
   if (state === 'error') {
     return (
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '0 24px 40px' }}>
+        <div style={{ marginBottom: 16 }}>{PeriodSelector}</div>
         <div
           style={{
             background: 'rgba(232,74,74,0.08)',
@@ -1334,7 +1392,8 @@ export default function DigestPage() {
 
   if (!digest) return null
 
-  const weekLabel = formatWeekStart(digest.meta.week_start)
+  const periodLabel = digest.meta.period_label
+  const periodDate = formatPeriodDate(digest.meta.period, digest.meta.period_start)
   const generatedAt = formatGeneratedAt(digest.meta.generated_at)
 
   return (
@@ -1440,8 +1499,8 @@ export default function DigestPage() {
           }}
         >
           <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>ProGuard</span>
-          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Weekly Claims Digest</span>
-          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{weekLabel}</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{periodLabel} Claims Digest</span>
+          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{periodDate}</span>
         </div>
 
         {/* ── action bar ────────────────────────────────────────────────── */}
@@ -1456,13 +1515,16 @@ export default function DigestPage() {
             borderBottom: '1px solid var(--border)',
           }}
         >
-          <div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
-              Weekly Digest — Week of {weekLabel}
-            </span>
-            <span style={{ fontSize: 12, color: 'var(--text-tertiary)', marginLeft: 12 }}>
-              Generated {generatedAt}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            {PeriodSelector}
+            <div>
+              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
+                {periodLabel} Digest — {periodDate}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--text-tertiary)', marginLeft: 12 }}>
+                Generated {generatedAt}
+              </span>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
@@ -1504,14 +1566,15 @@ export default function DigestPage() {
           <NarrativeSection
             status={narrativeStatus}
             text={narrativeText}
-            onRetry={fetchNarrative}
+            periodLabel={periodLabel}
+            onRetry={() => fetchNarrativeForPeriod(period)}
           />
 
           {/* ── SECTION 3: executive snapshot ───────────────────────────── */}
-          <SnapshotSection data={digest} />
+          <SnapshotSection data={digest} periodLabel={periodLabel} />
 
           {/* ── SECTION 4: pipeline health ──────────────────────────────── */}
-          <PipelineHealthSection data={digest} />
+          <PipelineHealthSection data={digest} periodLabel={periodLabel} />
 
           {/* ── SECTION 5: bottlenecks ──────────────────────────────────── */}
           <BottlenecksSection bottlenecks={digest.bottlenecks} />
@@ -1526,7 +1589,7 @@ export default function DigestPage() {
           <FinancialSection financial={digest.financial} />
 
           {/* ── SECTION 9: denials ──────────────────────────────────────── */}
-          <DenialsSection denials={digest.denials} />
+          <DenialsSection denials={digest.denials} periodLabel={periodLabel} />
 
         </div>
       </div>

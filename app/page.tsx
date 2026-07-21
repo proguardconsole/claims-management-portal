@@ -1,148 +1,14 @@
-import { getServerSupabase } from '../lib/supabase/server'
+'use client'
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+import { useEffect, useRef, useState } from 'react'
 
-const OPEN_STATUSES = ['ast_open', 'ust_open', 'ust_pre_tank'] as const
+// ─── types ────────────────────────────────────────────────────────────────────
 
-function daysAgo(isoStr: string): number {
-  const ms = Date.now() - new Date(isoStr).getTime()
-  return ms / (1000 * 60 * 60 * 24)
-}
-
-function timeAgo(isoStr: string): string {
-  const mins = Math.floor(daysAgo(isoStr) * 24 * 60)
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.floor(hrs / 24)}d ago`
-}
-
-function monthStart(): string {
-  const d = new Date()
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString()
-}
-
-function overdueThreshold(): string {
-  return new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
-}
-
-// ─── data fetchers ─────────────────────────────────────────────────────────────
-
-async function fetchKpis() {
-  const sb = getServerSupabase()
-
-  const [openRes, overdueRes, closedEventsRes, openDatesRes] = await Promise.all([
-    sb
-      .from('claims')
-      .select('*', { count: 'exact', head: true })
-      .in('claim_status', [...OPEN_STATUSES]),
-
-    sb
-      .from('claims')
-      .select('*', { count: 'exact', head: true })
-      .in('claim_status', [...OPEN_STATUSES])
-      .lt('modified_time', overdueThreshold()),
-
-    // Count claims that actually transitioned into a completion stage this month
-    sb
-      .from('claim_events')
-      .select('claim_id')
-      .in('stage', ['Complete', 'Claim Denied'])
-      .gte('entered_at', monthStart())
-      .not('claim_id', 'is', null),
-
-    sb
-      .from('claims')
-      .select('date_claim_is_reported')
-      .in('claim_status', [...OPEN_STATUSES])
-      .not('date_claim_is_reported', 'is', null),
-  ])
-
-  const open = openRes.count ?? 0
-  const overdue = overdueRes.count ?? 0
-  // Distinct claim IDs that closed this month (one claim can have multiple close events)
-  const closedMonth = new Set(
-    (closedEventsRes.data ?? []).map((r) => r.claim_id as string),
-  ).size
-
-  let avgDaysOpen: number | null = null
-  if (openDatesRes.data && openDatesRes.data.length > 0) {
-    const ages = openDatesRes.data
-      .map((r) => daysAgo(r.date_claim_is_reported as string))
-      .filter((d) => d >= 0)
-    avgDaysOpen = ages.length > 0
-      ? Math.round((ages.reduce((a, b) => a + b, 0) / ages.length) * 10) / 10
-      : null
-  }
-
-  return { open, overdue, closedMonth, avgDaysOpen }
-}
+type Period = 'week' | 'month' | 'quarter' | 'year'
 
 type StageRow = { stage: string; count: number }
 
-async function fetchPipelineBreakdown(): Promise<{ ast: StageRow[]; ust: StageRow[] }> {
-  const sb = getServerSupabase()
-
-  const [astRes, ustRes] = await Promise.all([
-    sb.from('claims').select('stage').eq('claim_status', 'ast_open'),
-    // claim_status values for open UST: 'ust_open', 'ust_pre_tank' (confirmed from data)
-    sb
-      .from('claims')
-      .select('stage')
-      .in('claim_status', ['ust_open', 'ust_pre_tank'])
-      .eq('tank_type', 'UST'),
-  ])
-
-  function toRows(data: { stage: string }[] | null): StageRow[] {
-    if (!data) return []
-    const counts: Record<string, number> = {}
-    for (const r of data) {
-      const s = r.stage ?? 'Unknown'
-      counts[s] = (counts[s] ?? 0) + 1
-    }
-    return Object.entries(counts)
-      .map(([stage, count]) => ({ stage, count }))
-      .sort((a, b) => b.count - a.count)
-  }
-
-  return { ast: toRows(astRes.data), ust: toRows(ustRes.data) }
-}
-
 type Bottleneck = { stage: string; avgDays: number; claimCount: number }
-
-async function fetchBottlenecks(): Promise<Bottleneck[]> {
-  try {
-    const sb = getServerSupabase()
-    const { data } = await sb
-      .from('claim_events')
-      .select('stage, days_in_stage')
-      .gt('days_in_stage', 0)
-
-    if (!data || data.length === 0) return []
-
-    const agg: Record<string, number[]> = {}
-    for (const ev of data) {
-      const s = ev.stage as string
-      const d = ev.days_in_stage as number
-      if (s && d) {
-        if (!agg[s]) agg[s] = []
-        agg[s].push(d)
-      }
-    }
-
-    return Object.entries(agg)
-      .filter(([, vals]) => vals.length >= 5)
-      .map(([stage, vals]) => ({
-        stage,
-        avgDays: Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10,
-        claimCount: vals.length,
-      }))
-      .sort((a, b) => b.avgDays - a.avgDays)
-      .slice(0, 5)
-  } catch {
-    return []
-  }
-}
 
 type RecentClaim = {
   field_service_number: string | null
@@ -151,15 +17,44 @@ type RecentClaim = {
   modified_time: string | null
 }
 
-async function fetchRecentActivity(): Promise<RecentClaim[]> {
-  const sb = getServerSupabase()
-  const { data } = await sb
-    .from('claims')
-    .select('field_service_number, stage, owner_name, modified_time')
-    .in('claim_status', [...OPEN_STATUSES])
-    .order('modified_time', { ascending: false })
-    .limit(10)
-  return (data ?? []) as RecentClaim[]
+type KpiData = {
+  period: string
+  since: string
+  open: number
+  overdue: number
+  avgDaysOpen: number
+  closedThisPeriod: number
+  openedThisPeriod: number
+  deniedThisPeriod: number
+  avgDaysToClose: number
+  byAdjuster: { name: string; count: number }[]
+  byTankType: { type: string; count: number }[]
+  byStage: { stage: string; count: number }[]
+  byAge: { bucket: string; count: number }[]
+  byValue: { bucket: string; count: number }[]
+  byCoverage: { coverage: string; count: number }[]
+  pipeline: { ast: StageRow[]; ust: StageRow[] }
+  bottlenecks: Bottleneck[]
+  recent: RecentClaim[]
+}
+
+// ─── constants ────────────────────────────────────────────────────────────────
+
+const PERIODS: { value: Period; label: string; closedLabel: string }[] = [
+  { value: 'week',    label: 'Last Week',    closedLabel: 'Closed This Week'    },
+  { value: 'month',   label: 'Last Month',   closedLabel: 'Closed This Month'   },
+  { value: 'quarter', label: 'Last Quarter', closedLabel: 'Closed This Quarter' },
+  { value: 'year',    label: 'Last Year',    closedLabel: 'Closed This Year'    },
+]
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+function timeAgo(isoStr: string): string {
+  const mins = Math.floor((Date.now() - new Date(isoStr).getTime()) / 60_000)
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return `${Math.floor(hrs / 24)}d ago`
 }
 
 // ─── sub-components ───────────────────────────────────────────────────────────
@@ -177,6 +72,41 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
+    </div>
+  )
+}
+
+function PeriodSelector({
+  period,
+  onChange,
+}: {
+  period: Period
+  onChange: (p: Period) => void
+}) {
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      {PERIODS.map(({ value, label }) => {
+        const active = period === value
+        return (
+          <button
+            key={value}
+            onClick={() => onChange(value)}
+            style={{
+              padding: '5px 14px',
+              fontSize: 12,
+              fontWeight: active ? 600 : 400,
+              cursor: 'pointer',
+              background: active ? 'var(--bg-elevated)' : 'var(--bg-surface)',
+              color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+              border: `1px solid ${active ? 'var(--border-bright)' : 'var(--border)'}`,
+              borderLeft: active ? '3px solid var(--accent-yellow)' : '3px solid transparent',
+              borderRadius: 4,
+            }}
+          >
+            {label}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -231,6 +161,34 @@ function KpiCard({
           {sublabel}
         </div>
       )}
+    </div>
+  )
+}
+
+function KpiCardSkeleton() {
+  return (
+    <div
+      style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '20px 24px',
+        flex: 1,
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          width: 130,
+          height: 11,
+          borderRadius: 3,
+          background: 'var(--bg-elevated)',
+          marginBottom: 12,
+        }}
+      />
+      <div
+        style={{ width: 72, height: 48, borderRadius: 3, background: 'var(--bg-elevated)' }}
+      />
     </div>
   )
 }
@@ -305,14 +263,7 @@ function PipelineTable({ title, rows }: { title: string; rows: StageRow[] }) {
                   {count}
                 </span>
               </div>
-              {/* Bar */}
-              <div
-                style={{
-                  height: 3,
-                  background: 'var(--border)',
-                  borderRadius: 2,
-                }}
-              >
+              <div style={{ height: 3, background: 'var(--border)', borderRadius: 2 }}>
                 <div
                   style={{
                     height: '100%',
@@ -355,9 +306,7 @@ function BottleneckCard({ stage, avgDays, claimCount }: Bottleneck) {
       <div style={{ fontSize: 13, color: 'var(--text-primary)', marginBottom: 3 }}>
         {stage}
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-        {claimCount} claims
-      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{claimCount} claims</div>
     </div>
   )
 }
@@ -384,9 +333,7 @@ function ActivityRow({ claim }: { claim: RecentClaim }) {
       >
         {claim.field_service_number ?? '—'}
       </span>
-      <span style={{ color: 'var(--text-primary)', flex: 1 }}>
-        {claim.stage ?? '—'}
-      </span>
+      <span style={{ color: 'var(--text-primary)', flex: 1 }}>{claim.stage ?? '—'}</span>
       <span style={{ color: 'var(--text-secondary)', minWidth: 120 }}>
         {claim.owner_name ?? '—'}
       </span>
@@ -397,68 +344,276 @@ function ActivityRow({ claim }: { claim: RecentClaim }) {
   )
 }
 
-// ─── page ──────────────────────────────────────────────────────────────────────
+function BreakdownTable({
+  title,
+  rows,
+  limit,
+}: {
+  title: string
+  rows: { label: string; count: number }[]
+  limit?: number
+}) {
+  const displayed = limit ? rows.slice(0, limit) : rows
+  const total = rows.reduce((s, r) => s + r.count, 0)
 
-export default async function KpiSummaryPage() {
-  const [kpis, pipeline, bottlenecks, recent] = await Promise.all([
-    fetchKpis(),
-    fetchPipelineBreakdown(),
-    fetchBottlenecks(),
-    fetchRecentActivity(),
-  ])
+  return (
+    <div
+      style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '16px 20px',
+        flex: 1,
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 12,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          {title}
+        </span>
+        <span
+          style={{
+            fontSize: 18,
+            fontWeight: 700,
+            color: 'var(--accent-yellow)',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {total}
+        </span>
+      </div>
 
-  const overduePct =
-    kpis.open > 0 ? Math.round((kpis.overdue / kpis.open) * 100) : 0
+      {displayed.length === 0 ? (
+        <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>No data</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {displayed.map(({ label, count }) => (
+            <div
+              key={label}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                padding: '5px 0',
+                fontSize: 13,
+                borderBottom: '1px solid var(--border)',
+              }}
+            >
+              <span style={{ color: 'var(--text-primary)' }}>{label}</span>
+              <span
+                style={{
+                  color: 'var(--text-secondary)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {count}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── page ─────────────────────────────────────────────────────────────────────
+
+export default function KpiSummaryPage() {
+  const [period, setPeriod] = useState<Period>('month')
+  const [kpis, setKpis] = useState<KpiData | null>(null)
+  const [pipeline, setPipeline] = useState<{ ast: StageRow[]; ust: StageRow[] } | null>(null)
+  const [bottlenecks, setBottlenecks] = useState<Bottleneck[]>([])
+  const [recent, setRecent] = useState<RecentClaim[]>([])
+  const [loading, setLoading] = useState(true)
+  const [snapshotReady, setSnapshotReady] = useState(false)
+  const snapshotLoaded = useRef(false)
+
+  function loadKpis(silent: boolean) {
+    if (!silent && !kpis) setLoading(true)
+
+    fetch(`/api/internal/kpis?period=${period}`)
+      .then((r) => r.json())
+      .then((data: KpiData) => {
+        setKpis(data)
+        // Snapshot sections load once; don't replace on period change
+        if (!snapshotLoaded.current) {
+          snapshotLoaded.current = true
+          setPipeline(data.pipeline)
+          setBottlenecks(data.bottlenecks)
+          setRecent(data.recent)
+          setSnapshotReady(true)
+        }
+      })
+      .catch(console.error)
+      .finally(() => {
+        if (!silent) setLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    loadKpis(false)
+  }, [period]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const interval = setInterval(() => loadKpis(true), 120_000)
+    return () => clearInterval(interval)
+  }, [period]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const periodObj = PERIODS.find((p) => p.value === period) ?? PERIODS[1]
+  const overduePct = kpis && kpis.open > 0 ? Math.round((kpis.overdue / kpis.open) * 100) : 0
+  const showKpiSkeleton = loading && !kpis
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1400 }}>
-      {/* ── Section A: KPI strip ── */}
+
+      {/* ── Period selector ── */}
+      <PeriodSelector period={period} onChange={setPeriod} />
+
+      {/* ── Section A: Always-current KPIs ── */}
       <div>
-        <SectionLabel>Overview</SectionLabel>
+        <SectionLabel>Overview — current</SectionLabel>
         <div style={{ display: 'flex', gap: 16 }}>
-          <KpiCard
-            label="Open Claims"
-            value={kpis.open}
-            valueColor="var(--accent-yellow)"
-          />
-          <KpiCard
-            label="Overdue · 14+ days stale"
-            value={kpis.overdue}
-            sublabel={`${overduePct}% of open`}
-            valueColor="var(--accent-red)"
-          />
-          <KpiCard
-            label="Avg Days Open"
-            value={kpis.avgDaysOpen != null ? kpis.avgDaysOpen.toFixed(1) : null}
-          />
-          <KpiCard
-            label="Closed This Month"
-            value={kpis.closedMonth}
-            valueColor="var(--accent-green)"
-          />
+          {showKpiSkeleton ? (
+            [0, 1, 2, 3].map((i) => <KpiCardSkeleton key={i} />)
+          ) : (
+            <>
+              <KpiCard
+                label="Open Claims"
+                value={kpis?.open ?? '—'}
+                valueColor="var(--accent-yellow)"
+              />
+              <KpiCard
+                label="Overdue · 14+ days stale"
+                value={kpis?.overdue ?? '—'}
+                sublabel={kpis ? `${overduePct}% of open` : undefined}
+                valueColor="var(--accent-red)"
+              />
+              <KpiCard
+                label="Avg Days Open"
+                value={kpis?.avgDaysOpen != null ? kpis.avgDaysOpen.toFixed(1) : null}
+              />
+              <KpiCard
+                label={periodObj.closedLabel}
+                value={kpis?.closedThisPeriod ?? '—'}
+                valueColor="var(--accent-green)"
+              />
+            </>
+          )}
         </div>
       </div>
 
-      {/* ── Section B: Pipeline Breakdown ── */}
+      {/* ── Section B: Period-scoped KPIs ── */}
+      <div>
+        <SectionLabel>{periodObj.label}</SectionLabel>
+        <div style={{ display: 'flex', gap: 16 }}>
+          {showKpiSkeleton ? (
+            [0, 1, 2].map((i) => <KpiCardSkeleton key={i} />)
+          ) : (
+            <>
+              <KpiCard
+                label="Opened"
+                value={kpis?.openedThisPeriod ?? '—'}
+                valueColor="#4d90d8"
+              />
+              <KpiCard
+                label="Denied"
+                value={kpis?.deniedThisPeriod ?? '—'}
+                valueColor="var(--accent-red)"
+              />
+              <KpiCard
+                label="Avg Days to Close"
+                value={kpis?.avgDaysToClose ? `${kpis.avgDaysToClose.toFixed(1)}d` : '—'}
+              />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── Section C: Open Claims Breakdown (6 mini-tables, 2 rows) ── */}
+      <div>
+        <SectionLabel>Open Claims Breakdown</SectionLabel>
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+          {showKpiSkeleton ? (
+            [0, 1, 2].map((i) => <KpiCardSkeleton key={i} />)
+          ) : kpis ? (
+            <>
+              <BreakdownTable
+                title="By Adjuster"
+                rows={kpis.byAdjuster.map((r) => ({ label: r.name, count: r.count }))}
+              />
+              <BreakdownTable
+                title="By Tank Type"
+                rows={kpis.byTankType.map((r) => ({ label: r.type, count: r.count }))}
+              />
+              <BreakdownTable
+                title="By Stage"
+                rows={kpis.byStage.map((r) => ({ label: r.stage, count: r.count }))}
+                limit={8}
+              />
+            </>
+          ) : null}
+        </div>
+        <div style={{ display: 'flex', gap: 16 }}>
+          {showKpiSkeleton ? (
+            [0, 1, 2].map((i) => <KpiCardSkeleton key={i} />)
+          ) : kpis ? (
+            <>
+              <BreakdownTable
+                title="By Age"
+                rows={kpis.byAge.map((r) => ({ label: r.bucket, count: r.count }))}
+              />
+              <BreakdownTable
+                title="By Value"
+                rows={kpis.byValue.map((r) => ({ label: r.bucket, count: r.count }))}
+              />
+              <BreakdownTable
+                title="By Coverage"
+                rows={kpis.byCoverage.map((r) => ({ label: r.coverage, count: r.count }))}
+              />
+            </>
+          ) : null}
+        </div>
+      </div>
+
+      {/* ── Section D: Pipeline Breakdown ── */}
       <div>
         <SectionLabel>Pipeline Breakdown — Open Claims by Stage</SectionLabel>
-        <div style={{ display: 'flex', gap: 16 }}>
-          <PipelineTable title="AST Claims" rows={pipeline.ast} />
-          <PipelineTable title="UST Claims" rows={pipeline.ust} />
-        </div>
+        {!snapshotReady ? (
+          <div style={{ display: 'flex', gap: 16 }}>
+            <KpiCardSkeleton />
+            <KpiCardSkeleton />
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 16 }}>
+            <PipelineTable title="AST Claims" rows={pipeline!.ast} />
+            <PipelineTable title="UST Claims" rows={pipeline!.ust} />
+          </div>
+        )}
       </div>
 
-      {/* ── Section C: Bottleneck Alert ── */}
+      {/* ── Section E: Bottleneck Alert ── */}
       <div>
         <SectionLabel>Bottleneck Alert — Top Stages by Avg Dwell Time</SectionLabel>
-        {bottlenecks.length === 0 ? (
-          <div
-            style={{
-              color: 'var(--text-tertiary)',
-              fontSize: 13,
-              padding: '12px 0',
-            }}
-          >
+        {!snapshotReady ? (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 13, padding: '12px 0' }}>
+            Loading…
+          </div>
+        ) : bottlenecks.length === 0 ? (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 13, padding: '12px 0' }}>
             No stage history data yet. Run sync to populate.
           </div>
         ) : (
@@ -470,21 +625,9 @@ export default async function KpiSummaryPage() {
         )}
       </div>
 
-      {/* ── Section D: Recent Activity ── */}
+      {/* ── Section F: Recent Activity ── */}
       <div>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 12,
-          }}
-        >
-          <SectionLabel>Recent Activity</SectionLabel>
-          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-            Refreshes every 30s
-          </span>
-        </div>
+        <SectionLabel>Recent Activity</SectionLabel>
         <div
           style={{
             background: 'var(--bg-surface)',
@@ -493,7 +636,6 @@ export default async function KpiSummaryPage() {
             padding: '4px 16px',
           }}
         >
-          {/* Header row */}
           <div
             style={{
               display: 'flex',
@@ -517,11 +659,12 @@ export default async function KpiSummaryPage() {
           ))}
           {recent.length === 0 && (
             <div style={{ color: 'var(--text-tertiary)', fontSize: 13, padding: '12px 0' }}>
-              No recent activity
+              {!snapshotReady ? 'Loading…' : 'No recent activity'}
             </div>
           )}
         </div>
       </div>
+
     </div>
   )
 }

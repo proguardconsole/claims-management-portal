@@ -119,6 +119,39 @@ type AgentRow = {
   ust_open: number
 }
 
+type StaleClaim = {
+  id: string
+  field_service_number: string | null
+  deal_name: string | null
+  stage: string | null
+  tank_type: string | null
+  claim_status: string | null
+  owner_name: string | null
+  modified_time: string
+  days_stale: number
+  has_note: boolean
+  latest_note: string | null
+}
+
+type FunnelDatum = {
+  stage: string
+  astCount: number
+  ustCount: number
+  astAvgDays: number
+  ustAvgDays: number
+  totalCount: number
+}
+
+type FunnelPanelClaim = {
+  id: string
+  field_service_number: string | null
+  deal_name: string | null
+  tank_type: string | null
+  claim_status: string | null
+  owner_name: string | null
+  modified_time: string | null
+}
+
 // ─── constants ─────────────────────────────────────────────────────────────────
 
 const BUCKET_COLORS: Record<string, string> = {
@@ -136,44 +169,33 @@ const DENIAL_COLORS = [
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
-function cellBg(avgDays: number, claimCount: number): string {
-  if (claimCount === 0) return 'transparent'
-  if (avgDays < 14) return 'transparent'
-  if (avgDays < 21) return 'rgba(232, 200, 74, 0.15)'
-  if (avgDays < 30) return 'rgba(232, 200, 74, 0.35)'
-  if (avgDays < 60) return 'rgba(232, 130, 58, 0.40)'
-  return 'rgba(232, 74, 74, 0.35)'
+function funnelHeatColor(avgDays: number, count: number): string {
+  if (count === 0) return 'var(--bg-elevated)'
+  if (avgDays < 14) return '#4CAF82'
+  if (avgDays < 21) return 'rgba(232, 200, 74, 0.6)'
+  if (avgDays < 30) return 'rgba(232, 200, 74, 0.9)'
+  if (avgDays < 60) return 'rgba(232, 130, 58, 0.8)'
+  return 'rgba(232, 74, 74, 0.8)'
 }
 
 // ─── data transforms ───────────────────────────────────────────────────────────
 
-type StageTableRow = {
-  stage: string
-  ast: BottleneckRow | null
-  ust: BottleneckRow | null
-}
-
-function buildStageTable(rows: BottleneckRow[]): StageTableRow[] {
-  const lookup: Record<string, BottleneckRow> = {}
+function buildFunnelData(rows: BottleneckRow[]): FunnelDatum[] {
+  const map: Record<string, FunnelDatum> = {}
   for (const r of rows) {
-    lookup[`${r.stage}||${r.pipeline}`] = r
-  }
-
-  // Collect unique stages in API order (already sorted by avg_days DESC)
-  const seen: Record<string, true> = {}
-  const stages: string[] = []
-  for (const r of rows) {
-    if (!seen[r.stage]) {
-      seen[r.stage] = true
-      stages.push(r.stage)
+    if (!map[r.stage]) {
+      map[r.stage] = { stage: r.stage, astCount: 0, ustCount: 0, astAvgDays: 0, ustAvgDays: 0, totalCount: 0 }
+    }
+    if (r.pipeline === 'AST') {
+      map[r.stage].astCount   = r.claim_count
+      map[r.stage].astAvgDays = r.avg_days_in_stage
+    } else if (r.pipeline === 'UST') {
+      map[r.stage].ustCount   = r.claim_count
+      map[r.stage].ustAvgDays = r.avg_days_in_stage
     }
   }
-
-  return stages.map((stage) => ({
-    stage,
-    ast: lookup[`${stage}||AST`] ?? null,
-    ust: lookup[`${stage}||UST`] ?? null,
-  }))
+  for (const d of Object.values(map)) d.totalCount = d.astCount + d.ustCount
+  return Object.values(map).sort((a, b) => b.totalCount - a.totalCount)
 }
 
 type ChartDatum = { pipeline: string; [bucket: string]: number | string }
@@ -364,186 +386,396 @@ function LoadingSkeleton() {
   )
 }
 
-// ─── bottleneck table ──────────────────────────────────────────────────────────
+// ─── bottleneck funnel ─────────────────────────────────────────────────────────
 
-function BottleneckCell({ row }: { row: BottleneckRow | null }) {
-  if (!row || row.claim_count === 0) {
-    return (
-      <td
-        style={{
-          width: 140,
-          padding: '8px 12px',
-          verticalAlign: 'middle',
-          textAlign: 'center',
-        }}
-      >
-        <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>—</span>
-      </td>
-    )
-  }
-  const bg = cellBg(row.avg_days_in_stage, row.claim_count)
-  return (
-    <td
-      style={{
-        width: 140,
-        padding: '8px 12px',
-        background: bg,
-        verticalAlign: 'top',
-        borderRadius: 4,
-      }}
-    >
-      <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>
-        {row.claim_count} {row.claim_count === 1 ? 'claim' : 'claims'}
-      </div>
-      <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1 }}>
-        avg {row.avg_days_in_stage}d
-      </div>
-    </td>
-  )
-}
-
-const HEAT_LEGEND = [
-  { label: '< 14d',   bg: 'transparent', border: '1px solid var(--border)' },
-  { label: '14–21d',  bg: 'rgba(232, 200, 74, 0.15)', border: 'none' },
-  { label: '21–30d',  bg: 'rgba(232, 200, 74, 0.35)', border: 'none' },
-  { label: '30–60d',  bg: 'rgba(232, 130, 58, 0.40)', border: 'none' },
-  { label: '60d+',    bg: 'rgba(232, 74, 74, 0.35)',  border: 'none' },
-]
-
-function BottleneckHeatmap({ rows }: { rows: BottleneckRow[] }) {
-  const tableRows = buildStageTable(rows)
-
+function FunnelTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean
+  payload?: Array<{ payload: FunnelDatum }>
+}) {
+  if (!active || !payload?.length) return null
+  const d = payload[0].payload
   return (
     <div
       style={{
-        background: 'var(--bg-surface)',
+        background: 'var(--bg-header)',
         border: '1px solid var(--border)',
-        borderRadius: 6,
-        padding: '20px 24px',
+        borderRadius: 4,
+        padding: '10px 14px',
+        fontSize: 12,
       }}
     >
-      {/* Header */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
-          Stage bottleneck
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
-          Avg days open claims have been sitting in each stage
-        </div>
+      <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
+        {d.stage}
       </div>
+      <div style={{ color: 'var(--text-secondary)', marginBottom: 3 }}>
+        AST:{' '}
+        <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+          {d.astCount} claims
+        </span>
+        {d.astCount > 0 && (
+          <span style={{ color: 'var(--text-tertiary)' }}> · avg {d.astAvgDays}d</span>
+        )}
+      </div>
+      <div style={{ color: 'var(--text-secondary)' }}>
+        UST:{' '}
+        <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+          {d.ustCount} claims
+        </span>
+        {d.ustCount > 0 && (
+          <span style={{ color: 'var(--text-tertiary)' }}> · avg {d.ustAvgDays}d</span>
+        )}
+      </div>
+    </div>
+  )
+}
 
-      {tableRows.length === 0 ? (
-        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '12px 0' }}>
-          No data available
+function BottleneckFunnel({ rows }: { rows: BottleneckRow[] }) {
+  const [selectedStage, setSelectedStage] = useState<string | null>(null)
+  const [panelClaims, setPanelClaims] = useState<FunnelPanelClaim[]>([])
+  const [panelLoading, setPanelLoading] = useState(false)
+
+  const funnelData = buildFunnelData(rows)
+  const chartHeight = Math.max(400, funnelData.length * 56)
+  const now = Date.now()
+
+  const handleBarClick = useCallback((data: unknown) => {
+    const stage = (data as FunnelDatum).stage
+    setSelectedStage(stage)
+    setPanelLoading(true)
+    setPanelClaims([])
+    fetch(`/api/internal/claims?stage=${encodeURIComponent(stage)}`)
+      .then((r) => r.json())
+      .then((d) => setPanelClaims((d.claims ?? []) as FunnelPanelClaim[]))
+      .catch(() => {})
+      .finally(() => setPanelLoading(false))
+  }, [])
+
+  return (
+    <>
+      <div
+        style={{
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 6,
+          padding: '20px 24px',
+        }}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
+            Stage bottleneck
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
+            Open claims by stage — bar colour reflects avg days; click a bar to drill in
+          </div>
         </div>
-      ) : (
-        <>
-          <div style={{ overflowX: 'auto' }}>
-            <table
+
+        {funnelData.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '12px 0' }}>
+            No data available
+          </div>
+        ) : (
+          <>
+            <ResponsiveContainer width="100%" height={chartHeight}>
+              <BarChart
+                layout="vertical"
+                data={funnelData}
+                margin={{ top: 8, right: 48, left: 0, bottom: 4 }}
+                barGap={3}
+                barCategoryGap={14}
+              >
+                <CartesianGrid
+                  horizontal={false}
+                  stroke="rgba(255,255,255,0.08)"
+                  strokeDasharray="3 3"
+                />
+                <XAxis
+                  type="number"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }}
+                  allowDecimals={false}
+                  domain={[0, 'auto']}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="stage"
+                  width={160}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
+                />
+                <Tooltip
+                  content={<FunnelTooltip />}
+                  cursor={{ fill: 'rgba(255,255,255,0.03)' }}
+                />
+                <Bar
+                  dataKey="astCount"
+                  name="AST"
+                  radius={[0, 3, 3, 0]}
+                  barSize={12}
+                  cursor="pointer"
+                  onClick={handleBarClick}
+                >
+                  {funnelData.map((d) => (
+                    <Cell
+                      key={`ast-${d.stage}`}
+                      fill={funnelHeatColor(d.astAvgDays, d.astCount)}
+                      opacity={selectedStage && selectedStage !== d.stage ? 0.3 : 1}
+                    />
+                  ))}
+                </Bar>
+                <Bar
+                  dataKey="ustCount"
+                  name="UST"
+                  radius={[0, 3, 3, 0]}
+                  barSize={12}
+                  cursor="pointer"
+                  onClick={handleBarClick}
+                >
+                  {funnelData.map((d) => (
+                    <Cell
+                      key={`ust-${d.stage}`}
+                      fill={funnelHeatColor(d.ustAvgDays, d.ustCount)}
+                      opacity={selectedStage && selectedStage !== d.stage ? 0.3 : 1}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+
+            <div
               style={{
-                width: '100%',
-                borderCollapse: 'separate',
-                borderSpacing: '0 3px',
+                display: 'flex',
+                gap: 16,
+                marginTop: 16,
+                flexWrap: 'wrap',
+                alignItems: 'center',
               }}
             >
-              <thead>
-                <tr>
-                  <th
+              <span
+                style={{
+                  fontSize: 11,
+                  color: 'var(--text-tertiary)',
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Heat key:
+              </span>
+              {[
+                { label: '< 14d',  color: '#4CAF82' },
+                { label: '14–21d', color: 'rgba(232, 200, 74, 0.6)' },
+                { label: '21–30d', color: 'rgba(232, 200, 74, 0.9)' },
+                { label: '30–60d', color: 'rgba(232, 130, 58, 0.8)' },
+                { label: '60d+',   color: 'rgba(232, 74, 74, 0.8)' },
+              ].map(({ label, color }) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <div
                     style={{
-                      textAlign: 'left',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      letterSpacing: '0.06em',
-                      color: 'var(--text-tertiary)',
-                      padding: '0 12px 8px 0',
-                      width: '100%',
+                      width: 14,
+                      height: 14,
+                      borderRadius: 3,
+                      background: color,
+                      flexShrink: 0,
                     }}
-                  >
-                    STAGE
-                  </th>
-                  {['AST', 'UST'].map((p) => (
-                    <th
-                      key={p}
-                      style={{
-                        textAlign: 'left',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        letterSpacing: '0.06em',
-                        color: 'var(--text-tertiary)',
-                        padding: '0 0 8px 12px',
-                        width: 140,
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {p}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {tableRows.map(({ stage, ast, ust }) => (
-                  <tr key={stage}>
-                    <td
-                      style={{
-                        fontSize: 13,
-                        color: 'var(--text-secondary)',
-                        padding: '8px 12px 8px 0',
-                        verticalAlign: 'middle',
-                        borderBottom: '1px solid var(--border)',
-                      }}
-                    >
-                      {stage}
-                    </td>
-                    <BottleneckCell row={ast} />
-                    <BottleneckCell row={ust} />
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  />
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{label}</span>
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginLeft: 4 }}>
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <div style={{ width: 10, height: 10, borderRadius: 2, background: '#4CAF82' }} />
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>AST</span>
+                </div>
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <div style={{ width: 10, height: 10, borderRadius: 2, background: '#4CAF82' }} />
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>UST</span>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
 
-          {/* Legend */}
+      {selectedStage && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: 560,
+            background: 'var(--bg-surface)',
+            borderLeft: '1px solid var(--border)',
+            zIndex: 100,
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '-8px 0 24px rgba(0,0,0,0.3)',
+          }}
+        >
           <div
             style={{
               display: 'flex',
-              gap: 16,
-              marginTop: 20,
-              flexWrap: 'wrap',
+              justifyContent: 'space-between',
               alignItems: 'center',
+              padding: '16px 20px',
+              borderBottom: '1px solid var(--border)',
+              flexShrink: 0,
             }}
           >
-            <span
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
+                {selectedStage}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                {panelLoading ? 'Loading…' : `${panelClaims.length} open claims`}
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedStage(null)}
               style={{
-                fontSize: 11,
-                color: 'var(--text-tertiary)',
-                letterSpacing: '0.05em',
-                textTransform: 'uppercase',
+                padding: '6px 14px',
+                fontSize: 12,
+                fontWeight: 500,
+                background: 'transparent',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                cursor: 'pointer',
               }}
             >
-              Heat key:
-            </span>
-            {HEAT_LEGEND.map(({ label, bg, border }) => (
-              <div
-                key={label}
-                style={{ display: 'flex', alignItems: 'center', gap: 5 }}
-              >
-                <div
-                  style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: 3,
-                    background: bg,
-                    border,
-                    flexShrink: 0,
-                  }}
-                />
-                <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{label}</span>
-              </div>
-            ))}
+              Close
+            </button>
           </div>
-        </>
+
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {panelLoading ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  height: 200,
+                }}
+              >
+                <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Loading…</span>
+              </div>
+            ) : panelClaims.length === 0 ? (
+              <div
+                style={{
+                  padding: '32px 20px',
+                  fontSize: 13,
+                  color: 'var(--text-tertiary)',
+                  textAlign: 'center',
+                }}
+              >
+                No open claims in this stage
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    {['FSN', 'Deal Name', 'Pipeline', 'Owner', 'Days'].map((h) => (
+                      <th
+                        key={h}
+                        style={{
+                          textAlign: 'left',
+                          padding: '10px 12px 8px',
+                          fontSize: 11,
+                          fontWeight: 600,
+                          letterSpacing: '0.05em',
+                          color: 'var(--text-tertiary)',
+                          borderBottom: '1px solid var(--border)',
+                          position: 'sticky',
+                          top: 0,
+                          background: 'var(--bg-surface)',
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {panelClaims.map((c) => {
+                    const days = c.modified_time
+                      ? Math.round(
+                          (now - new Date(c.modified_time).getTime()) / (1000 * 60 * 60 * 24),
+                        )
+                      : null
+                    const pipeline = c.claim_status?.startsWith('ast')
+                      ? 'AST'
+                      : c.claim_status?.startsWith('ust')
+                      ? 'UST'
+                      : (c.tank_type ?? '—')
+                    return (
+                      <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' }}>
+                          <a
+                            href={`https://crm.zoho.com/crm/org884788391/tab/Deals/${c.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              color: '#2a78d6',
+                              textDecoration: 'none',
+                              fontWeight: 500,
+                            }}
+                          >
+                            {c.field_service_number ?? c.id.slice(-6)}
+                          </a>
+                        </td>
+                        <td
+                          style={{
+                            padding: '9px 12px',
+                            color: 'var(--text-primary)',
+                            maxWidth: 180,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {c.deal_name ?? '—'}
+                        </td>
+                        <td style={{ padding: '9px 12px', color: 'var(--text-secondary)' }}>
+                          {pipeline}
+                        </td>
+                        <td
+                          style={{
+                            padding: '9px 12px',
+                            color: 'var(--text-secondary)',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {c.owner_name ?? '—'}
+                        </td>
+                        <td
+                          style={{
+                            padding: '9px 12px',
+                            fontWeight: 500,
+                            whiteSpace: 'nowrap',
+                            color:
+                              days !== null && days >= 30
+                                ? '#E84A4A'
+                                : days !== null && days >= 14
+                                ? '#E8C84A'
+                                : 'var(--text-secondary)',
+                          }}
+                        >
+                          {days !== null ? `${days}d` : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
       )}
-    </div>
+    </>
   )
 }
 
@@ -621,7 +853,7 @@ function StaleTriageChart({ rows }: { rows: StaleRow[] }) {
     >
       {/* Header */}
       <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
           Stale claim triage
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
@@ -706,6 +938,311 @@ function StaleTriageChart({ rows }: { rows: StaleRow[] }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ─── stale checklist ───────────────────────────────────────────────────────────
+
+function StaleChecklist({
+  claims,
+  loading,
+}: {
+  claims: StaleClaim[]
+  loading: boolean
+}) {
+  const [showAll, setShowAll] = useState(false)
+  const [noteInputs, setNoteInputs] = useState<Record<string, string>>({})
+  const [noteExpanded, setNoteExpanded] = useState<Record<string, boolean>>({})
+  const [noteSaving, setNoteSaving] = useState<Record<string, boolean>>({})
+  const [localNoted, setLocalNoted] = useState<Record<string, string>>({})
+
+  const remaining = claims.filter((c) => !c.has_note && !localNoted[c.id]).length
+  const visibleClaims = showAll ? claims : claims.filter((c) => !c.has_note && !localNoted[c.id])
+
+  const handleSave = async (claim: StaleClaim) => {
+    const note = (noteInputs[claim.id] ?? '').trim()
+    if (!note) return
+    setNoteSaving((s) => ({ ...s, [claim.id]: true }))
+    try {
+      const res = await fetch('/api/internal/stale-claims', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          claim_id: claim.id,
+          field_service_number: claim.field_service_number,
+          note,
+          noted_by: 'Team',
+        }),
+      })
+      if (res.ok) {
+        setLocalNoted((n) => ({ ...n, [claim.id]: note }))
+        setNoteExpanded((e) => ({ ...e, [claim.id]: false }))
+        setNoteInputs((i) => ({ ...i, [claim.id]: '' }))
+      }
+    } catch {}
+    setNoteSaving((s) => ({ ...s, [claim.id]: false }))
+  }
+
+  return (
+    <div
+      style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '20px 24px',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          marginBottom: 16,
+          gap: 12,
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
+            Stale Claims Checklist
+            {!loading && (
+              <span style={{ fontWeight: 400, color: 'var(--text-tertiary)', marginLeft: 8 }}>
+                · {remaining} remaining
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
+            Open claims with no activity for 14+ days — add a note to mark as actioned
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+          {(['Hide Noted', 'Show All'] as const).map((label) => {
+            const active = label === 'Show All' ? showAll : !showAll
+            return (
+              <button
+                key={label}
+                onClick={() => setShowAll(label === 'Show All')}
+                style={{
+                  padding: '4px 12px',
+                  fontSize: 12,
+                  fontWeight: active ? 600 : 400,
+                  cursor: 'pointer',
+                  background: active ? 'var(--bg-elevated)' : 'transparent',
+                  color: active ? 'var(--accent-yellow)' : 'var(--text-secondary)',
+                  border: `1px solid ${active ? 'var(--accent-yellow)' : 'var(--border)'}`,
+                  borderRadius: 4,
+                  transition: 'all 0.1s',
+                }}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} width="100%" height={40} />
+          ))}
+        </div>
+      ) : visibleClaims.length === 0 ? (
+        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '12px 0' }}>
+          {showAll ? 'No stale claims' : 'All stale claims have been noted'}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {visibleClaims.map((claim) => {
+            const isNoted = claim.has_note || !!localNoted[claim.id]
+            const noteText = localNoted[claim.id] ?? claim.latest_note
+            const expanded = noteExpanded[claim.id] ?? false
+            const saving = noteSaving[claim.id] ?? false
+
+            return (
+              <div
+                key={claim.id}
+                style={{
+                  borderBottom: '1px solid var(--border)',
+                  opacity: isNoted ? 0.5 : 1,
+                  transition: 'opacity 0.2s',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '10px 0',
+                  }}
+                >
+                  <div style={{ width: 80, flexShrink: 0 }}>
+                    <a
+                      href={`https://crm.zoho.com/crm/org884788391/tab/Deals/${claim.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: 13, fontWeight: 700, color: '#2a78d6', textDecoration: 'none' }}
+                    >
+                      {claim.field_service_number ?? '—'}
+                    </a>
+                  </div>
+                  <div
+                    style={{
+                      flex: 1,
+                      fontSize: 13,
+                      color: 'var(--text-primary)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {claim.deal_name ?? '—'}
+                  </div>
+                  <div
+                    style={{
+                      width: 120,
+                      flexShrink: 0,
+                      fontSize: 12,
+                      color: 'var(--text-secondary)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {claim.stage ?? '—'}
+                  </div>
+                  <div
+                    style={{ width: 40, flexShrink: 0, fontSize: 12, color: 'var(--text-tertiary)' }}
+                  >
+                    {claim.tank_type ?? '—'}
+                  </div>
+                  <div
+                    style={{
+                      width: 100,
+                      flexShrink: 0,
+                      fontSize: 12,
+                      color: 'var(--text-secondary)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {claim.owner_name ?? '—'}
+                  </div>
+                  <div
+                    style={{
+                      width: 44,
+                      flexShrink: 0,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      textAlign: 'right',
+                      color:
+                        claim.days_stale >= 30
+                          ? '#E84A4A'
+                          : claim.days_stale >= 14
+                          ? '#E8C84A'
+                          : 'var(--text-secondary)',
+                    }}
+                  >
+                    {claim.days_stale}d
+                  </div>
+                  <div style={{ width: 100, flexShrink: 0, textAlign: 'right' }}>
+                    {isNoted ? (
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: '#4CAF82',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          justifyContent: 'flex-end',
+                        }}
+                      >
+                        <span>✓</span> Noted
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() =>
+                          setNoteExpanded((e) => ({ ...e, [claim.id]: !e[claim.id] }))
+                        }
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: 12,
+                          fontWeight: 500,
+                          background: 'transparent',
+                          color: 'var(--text-secondary)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {expanded ? 'Cancel' : 'Add Note'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {isNoted && noteText && (
+                  <div
+                    style={{
+                      paddingBottom: 8,
+                      fontSize: 12,
+                      color: 'var(--text-tertiary)',
+                      fontStyle: 'italic',
+                    }}
+                  >
+                    &ldquo;{noteText}&rdquo;
+                  </div>
+                )}
+
+                {!isNoted && expanded && (
+                  <div
+                    style={{ paddingBottom: 10, display: 'flex', gap: 8, alignItems: 'flex-start' }}
+                  >
+                    <textarea
+                      value={noteInputs[claim.id] ?? ''}
+                      onChange={(e) =>
+                        setNoteInputs((i) => ({ ...i, [claim.id]: e.target.value }))
+                      }
+                      placeholder="What action was taken or is planned?"
+                      rows={2}
+                      style={{
+                        flex: 1,
+                        fontSize: 12,
+                        padding: '7px 10px',
+                        background: 'var(--bg-elevated)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 4,
+                        color: 'var(--text-primary)',
+                        resize: 'vertical',
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    <button
+                      onClick={() => handleSave(claim)}
+                      disabled={saving || !(noteInputs[claim.id] ?? '').trim()}
+                      style={{
+                        padding: '7px 14px',
+                        fontSize: 12,
+                        fontWeight: 500,
+                        background: '#4CAF82',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 4,
+                        cursor: saving ? 'default' : 'pointer',
+                        opacity: saving || !(noteInputs[claim.id] ?? '').trim() ? 0.6 : 1,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {saving ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -887,7 +1424,7 @@ function VolumeChart({ volume }: { volume: VolumeData }) {
       }}
     >
       <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
           Claims opened vs. closed
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
@@ -1087,7 +1624,7 @@ function DwellChart({
         }}
       >
         <div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
             Stage dwell time
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
@@ -1297,7 +1834,7 @@ function FinancialExposureSection({ financial }: { financial: FinancialData }) {
     >
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
           Financial exposure
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
@@ -1437,7 +1974,7 @@ function AgentWorkloadSection({ rows }: { rows: AgentRow[] }) {
     >
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
           Agent workload
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
@@ -1802,7 +2339,7 @@ function DenialRateSection({
     >
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
           Denial rate
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
@@ -1985,6 +2522,7 @@ export default function AnalyticsPage() {
   const [bottleneck, setBottleneck] = useState<BottleneckRow[]>([])
   const [stale, setStale] = useState<StaleRow[]>([])
   const [agentRows, setAgentRows] = useState<AgentRow[]>([])
+  const [staleChecklist, setStaleChecklist] = useState<StaleClaim[]>([])
   const [opsLoading, setOpsLoading] = useState(true)
   const [opsError, setOpsError] = useState<string | null>(null)
 
@@ -2006,10 +2544,11 @@ export default function AnalyticsPage() {
     setOpsLoading(true)
     setOpsError(null)
     try {
-      const [bRes, sRes, aRes] = await Promise.all([
+      const [bRes, sRes, aRes, scRes] = await Promise.all([
         fetch('/api/internal/analytics?view=bottleneck'),
         fetch('/api/internal/analytics?view=stale'),
         fetch('/api/internal/analytics?view=agents'),
+        fetch('/api/internal/stale-claims'),
       ])
       if (!bRes.ok) {
         const body = await bRes.json().catch(() => ({}))
@@ -2023,10 +2562,17 @@ export default function AnalyticsPage() {
         const body = await aRes.json().catch(() => ({}))
         throw new Error(body.error ?? `Agents request failed (${aRes.status})`)
       }
-      const [bData, sData, aData] = await Promise.all([bRes.json(), sRes.json(), aRes.json()])
+      if (!scRes.ok) {
+        const body = await scRes.json().catch(() => ({}))
+        throw new Error(body.error ?? `Stale claims request failed (${scRes.status})`)
+      }
+      const [bData, sData, aData, scData] = await Promise.all([
+        bRes.json(), sRes.json(), aRes.json(), scRes.json(),
+      ])
       setBottleneck(bData.data ?? [])
       setStale(sData.data ?? [])
       setAgentRows(aData.data ?? [])
+      setStaleChecklist(scData.claims ?? [])
     } catch (err) {
       setOpsError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -2174,9 +2720,12 @@ export default function AnalyticsPage() {
           <ErrorCard error={opsError} onRetry={fetchOps} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            <BottleneckHeatmap rows={bottleneck} />
+            <BottleneckFunnel rows={bottleneck} />
             <StaleTriageChart rows={stale} />
-            <AgentWorkloadSection rows={agentRows} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+              <StaleChecklist claims={staleChecklist} loading={false} />
+              <AgentWorkloadSection rows={agentRows} />
+            </div>
           </div>
         )
       )}
@@ -2196,10 +2745,12 @@ export default function AnalyticsPage() {
               onPipelineChange={handleDwellPipeline}
               loading={dwellLoading}
             />
-            {financialData && <FinancialExposureSection financial={financialData} />}
-            {denialTrend.length > 0 && (
-              <DenialRateSection trend={denialTrend} reasons={denialReasons} />
-            )}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+              {financialData && <FinancialExposureSection financial={financialData} />}
+              {denialTrend.length > 0 && (
+                <DenialRateSection trend={denialTrend} reasons={denialReasons} />
+              )}
+            </div>
           </div>
         )
       )}

@@ -3,26 +3,41 @@
 @tailwind utilities;
 
 :root {
-  --bg-base:        #0D1F0F;
-  --bg-surface:     #152A17;
-  --bg-elevated:    #1C3520;
-  --bg-header:      #0A1A0C;
-  --accent-yellow:  #E8C84A;
-  --accent-green:   #4AE89A;
-  --accent-red:     #E85A4A;
-  --accent-amber:   #E8A84A;
+  /* Backgrounds */
+  --bg-base:     #0d150f;
+  --bg-surface:  #112b1a;
+  --bg-elevated: #1a3d26;
+  --bg-header:   #091208;
+
+  /* Brand greens */
+  --brand-primary: #0d3320;
+  --brand-mid:     #1B5E3B;
+  --brand-cta:     #2e8b57;
+
+  /* Accents */
+  --accent-yellow: #E8C84A;
+  --accent-green:  #4AE89A;
+  --accent-red:    #E85A4A;
+  --accent-amber:  #E8A84A;
+
+  /* Text */
   --text-primary:   #FFFFFF;
   --text-secondary: #8FA882;
   --text-tertiary:  #5A7A5C;
-  --border:         #2A4A2C;
-  --border-bright:  #3A6A3C;
+
+  /* Borders */
+  --border:        #2A4A2C;
+  --border-bright: #3A6A3C;
+
+  /* Gold */
+  --gold: #f2c12e;
 }
 
 html,
 body {
   background: var(--bg-base);
   color: var(--text-primary);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -10,6 +11,7 @@ import {
   TrendingUp,
   Archive,
   FileBarChart,
+  Info,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
@@ -28,6 +30,7 @@ interface SidebarProps {
 
 export default function Sidebar({ lastSynced }: SidebarProps) {
   const pathname = usePathname()
+  const [showSyncTip, setShowSyncTip] = useState(false)
 
   function isActive(href: string) {
     if (href === '/') return pathname === '/'
@@ -116,11 +119,50 @@ export default function Sidebar({ lastSynced }: SidebarProps) {
           borderTop: '1px solid var(--border)',
         }}
       >
-        <div
-          style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.4 }}
-        >
-          <div style={{ textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+          <div
+            style={{
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              marginBottom: 2,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
             Last synced
+            <span
+              style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}
+              onMouseEnter={() => setShowSyncTip(true)}
+              onMouseLeave={() => setShowSyncTip(false)}
+            >
+              <Info size={12} style={{ cursor: 'default', color: 'var(--text-tertiary)' }} />
+              {showSyncTip && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: 'calc(100% + 6px)',
+                    left: 0,
+                    width: 210,
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-bright)',
+                    borderRadius: 4,
+                    padding: '7px 10px',
+                    fontSize: 11,
+                    color: 'var(--text-secondary)',
+                    lineHeight: 1.5,
+                    zIndex: 200,
+                    boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
+                    whiteSpace: 'normal',
+                    textTransform: 'none',
+                    letterSpacing: 'normal',
+                    fontWeight: 400,
+                  }}
+                >
+                  Data is synced from Zoho CRM once daily. The dashboard refreshes every 2 minutes from the local database.
+                </div>
+              )}
+            </span>
           </div>
           <div>{formatLastSynced(lastSynced)}</div>
         </div>

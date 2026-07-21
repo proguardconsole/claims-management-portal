@@ -24,6 +24,24 @@ export const DEFAULT_FILTERS: FilterState = {
   sort: 'updated_desc',
 }
 
+type ComboboxOption = string | { value: string; label: string; separator?: boolean }
+
+function optVal(o: ComboboxOption): string {
+  return typeof o === 'string' ? o : o.value
+}
+
+function optLabel(o: ComboboxOption): string {
+  return typeof o === 'string' ? o : o.label
+}
+
+// ─── UST virtual filter presets appended to stage dropdown ────────────────────
+
+const UST_VIRTUAL_STAGES: ComboboxOption[] = [
+  { value: '__ust_group__', label: 'UST Status', separator: true },
+  { value: '__pending_ust_pull__', label: 'Pending UST Pull' },
+  { value: '__pre_remediation__', label: 'Pre-Remediation' },
+]
+
 interface FilterBarProps {
   owners: string[]
   oilDealers: string[]
@@ -52,7 +70,7 @@ function Combobox({
 }: {
   placeholder: string
   value: string
-  options: string[]
+  options: ComboboxOption[]
   onChange: (v: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -71,8 +89,19 @@ function Combobox({
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
+  const displayLabel = (() => {
+    for (const o of options) {
+      if (typeof o === 'string') { if (o === value) return o }
+      else { if (o.value === value) return o.label }
+    }
+    return value
+  })()
+
   const filtered = query
-    ? options.filter((o) => o.toLowerCase().includes(query.toLowerCase()))
+    ? options.filter((o) => {
+        if (typeof o !== 'string' && o.separator) return false
+        return optLabel(o).toLowerCase().includes(query.toLowerCase())
+      })
     : options
 
   // Active state — show chip
@@ -94,7 +123,7 @@ function Combobox({
         }}
       >
         <span style={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {value}
+          {displayLabel}
         </span>
         <button
           onClick={() => onChange('')}
@@ -153,32 +182,55 @@ function Combobox({
             minWidth: 160,
           }}
         >
-          {filtered.map((o) => (
-            <div
-              key={o}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                onChange(o)
-                setOpen(false)
-                setQuery('')
-              }}
-              style={{
-                padding: '7px 12px',
-                fontSize: 12,
-                cursor: 'pointer',
-                color: 'var(--text-primary)',
-                borderBottom: '1px solid var(--border)',
-              }}
-              onMouseEnter={(e) => {
-                ;(e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)'
-              }}
-              onMouseLeave={(e) => {
-                ;(e.currentTarget as HTMLElement).style.background = 'transparent'
-              }}
-            >
-              {o}
-            </div>
-          ))}
+          {filtered.map((o, i) => {
+            const isSep = typeof o !== 'string' && o.separator
+            if (isSep) {
+              return (
+                <div
+                  key={`sep-${i}`}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: 10,
+                    color: 'var(--text-tertiary)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    background: 'var(--bg-header)',
+                    borderTop: '1px solid var(--border)',
+                    borderBottom: '1px solid var(--border)',
+                    userSelect: 'none',
+                  }}
+                >
+                  {optLabel(o)}
+                </div>
+              )
+            }
+            return (
+              <div
+                key={optVal(o)}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  onChange(optVal(o))
+                  setOpen(false)
+                  setQuery('')
+                }}
+                style={{
+                  padding: '7px 12px',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  color: 'var(--text-primary)',
+                  borderBottom: '1px solid var(--border)',
+                }}
+                onMouseEnter={(e) => {
+                  ;(e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)'
+                }}
+                onMouseLeave={(e) => {
+                  ;(e.currentTarget as HTMLElement).style.background = 'transparent'
+                }}
+              >
+                {optLabel(o)}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -204,6 +256,8 @@ export default function FilterBar({
   function set(key: keyof FilterState, val: string) {
     onChange({ ...filters, [key]: val })
   }
+
+  const stageOptions: ComboboxOption[] = [...stages, ...UST_VIRTUAL_STAGES]
 
   return (
     <div
@@ -232,7 +286,7 @@ export default function FilterBar({
       <Combobox
         placeholder={stageLabel}
         value={filters.stage}
-        options={stages}
+        options={stageOptions}
         onChange={(v) => set('stage', v)}
       />
       <Combobox

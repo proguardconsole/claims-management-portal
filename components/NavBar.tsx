@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Shield } from 'lucide-react'
 
 function pad(n: number) {
   return String(n).padStart(2, '0')
@@ -44,23 +43,13 @@ export default function NavBar() {
         zIndex: 50,
       }}
     >
-      {/* Left — wordmark */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Shield
-          size={18}
-          style={{ color: 'var(--accent-yellow)', flexShrink: 0 }}
-          strokeWidth={2.5}
+      {/* Left — logo */}
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        <img
+          src="https://septic.proguardplans.com/logo-white.png"
+          alt="ProGuard"
+          style={{ height: 28, width: 'auto', objectFit: 'contain' }}
         />
-        <span
-          style={{
-            color: 'var(--accent-yellow)',
-            fontWeight: 700,
-            fontSize: 15,
-            letterSpacing: '0.12em',
-          }}
-        >
-          PROGUARD
-        </span>
       </div>
 
       {/* Center — subtitle */}

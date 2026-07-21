@@ -87,16 +87,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const [{ data: estRows }, { data: payRows }] = await Promise.all([
     ids.length > 0
-      ? sb.from('estimates').select('claim_id, estimate_total').in('claim_id', ids)
-      : Promise.resolve({ data: [] as { claim_id: string; estimate_total: number | null }[] }),
+      ? sb
+          .from('estimates')
+          .select('claim_id, contractor_name, estimate_total')
+          .in('claim_id', ids)
+      : Promise.resolve({
+          data: [] as {
+            claim_id: string
+            contractor_name: string | null
+            estimate_total: number | null
+          }[],
+        }),
     ids.length > 0
       ? sb.from('claim_payments').select('claim_id, amount').in('claim_id', ids)
       : Promise.resolve({ data: [] as { claim_id: string; amount: number | null }[] }),
   ])
 
   const estimateMap: Record<string, number> = {}
+  const contractorMap: Record<string, string> = {}
   for (const e of estRows ?? []) {
-    if (e.claim_id) estimateMap[e.claim_id] = (estimateMap[e.claim_id] ?? 0) + (e.estimate_total ?? 0)
+    if (e.claim_id) {
+      estimateMap[e.claim_id] = (estimateMap[e.claim_id] ?? 0) + (e.estimate_total ?? 0)
+      if (!contractorMap[e.claim_id] && e.contractor_name) {
+        contractorMap[e.claim_id] = e.contractor_name
+      }
+    }
   }
   const paymentMap: Record<string, number> = {}
   for (const p of payRows ?? []) {
@@ -107,6 +122,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ...c,
     estimate_total: estimateMap[c.id] ?? 0,
     payment_total: paymentMap[c.id] ?? 0,
+    contractor_name: contractorMap[c.id] ?? null,
   }))
 
   return NextResponse.json({ claims: enriched, total: enriched.length })

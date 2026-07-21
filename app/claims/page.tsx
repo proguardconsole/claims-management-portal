@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { FileText, Phone, ExternalLink } from 'lucide-react'
+import { FileText, Phone, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react'
 import AdvancedFilterBar, { type FilterState, DEFAULT_FILTERS } from '../../components/FilterBar'
 
 // ─── types ─────────────────────────────────────────────────────────────────────
@@ -32,6 +32,14 @@ type Claim = {
   description: string | null
   estimate_total: number | null
   payment_total: number | null
+  contractor_name: string | null
+}
+
+type ContractorRow = {
+  contractor_name: string
+  claim_count: number
+  total_estimated: number
+  total_paid: number
 }
 
 type StageEvent = {
@@ -297,12 +305,14 @@ function FilterBar({
   search,
   setSearch,
   counts,
+  lastUpdatedLabel,
 }: {
   pipeline: 'all' | 'AST' | 'UST'
   setPipeline: (p: 'all' | 'AST' | 'UST') => void
   search: string
   setSearch: (s: string) => void
   counts: { all: number; ast: number; ust: number }
+  lastUpdatedLabel?: string
 }) {
   const tabs: { key: 'all' | 'AST' | 'UST'; label: string; count: number }[] = [
     { key: 'all', label: 'All', count: counts.all },
@@ -319,7 +329,8 @@ function FilterBar({
         flexShrink: 0,
       }}
     >
-      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flex: 1 }}>
         {tabs.map(({ key, label, count }) => {
           const active = pipeline === key
           return (
@@ -346,6 +357,12 @@ function FilterBar({
             </button>
           )
         })}
+        </div>
+        {lastUpdatedLabel && (
+          <span style={{ fontSize: 10, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
+            Last updated: {lastUpdatedLabel}
+          </span>
+        )}
       </div>
       <input
         type="text"
@@ -930,6 +947,176 @@ function ClaimDetail({
   )
 }
 
+function ContractorSection({
+  contractorFilter,
+  setContractorFilter,
+}: {
+  contractorFilter: string
+  setContractorFilter: (name: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [rows, setRows] = useState<ContractorRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const fetched = useRef(false)
+
+  function toggle() {
+    if (!fetched.current) {
+      setLoading(true)
+      fetch('/api/internal/contractors')
+        .then((r) => r.json())
+        .then((data: { contractors: ContractorRow[] }) => {
+          setRows(data.contractors ?? [])
+          fetched.current = true
+        })
+        .catch(console.error)
+        .finally(() => setLoading(false))
+    }
+    setOpen((o) => !o)
+  }
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+      {/* Toggle header */}
+      <button
+        onClick={toggle}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          width: '100%',
+          padding: '7px 14px',
+          background: 'var(--bg-header)',
+          border: 'none',
+          cursor: 'pointer',
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: 'var(--text-secondary)',
+        }}
+      >
+        <span>
+          By Contractor{rows.length > 0 ? ` · ${rows.length}` : ''}
+          {contractorFilter && (
+            <span style={{ color: 'var(--accent-yellow)', marginLeft: 6, fontWeight: 700 }}>
+              {contractorFilter}
+            </span>
+          )}
+        </span>
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+      </button>
+
+      {open && (
+        <div style={{ maxHeight: 240, overflowY: 'auto', background: 'var(--bg-surface)' }}>
+          {loading ? (
+            <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--text-tertiary)' }}>
+              Loading…
+            </div>
+          ) : rows.length === 0 ? (
+            <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--text-tertiary)' }}>
+              No contractor data
+            </div>
+          ) : (
+            <>
+              {/* Column headers */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '2fr 40px 1fr 1fr',
+                  padding: '4px 14px',
+                  borderBottom: '1px solid var(--border)',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  color: 'var(--text-tertiary)',
+                }}
+              >
+                <span>Contractor</span>
+                <span style={{ textAlign: 'right' }}>#</span>
+                <span style={{ textAlign: 'right' }}>Est. Total</span>
+                <span style={{ textAlign: 'right' }}>Paid</span>
+              </div>
+              {/* Data rows */}
+              {rows.map((row) => {
+                const active = row.contractor_name === contractorFilter
+                return (
+                  <div
+                    key={row.contractor_name}
+                    onClick={() =>
+                      setContractorFilter(active ? '' : row.contractor_name)
+                    }
+                    onMouseEnter={(e) => {
+                      if (!active)
+                        (e.currentTarget as HTMLElement).style.background =
+                          'var(--bg-elevated)'
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!active)
+                        (e.currentTarget as HTMLElement).style.background = 'transparent'
+                    }}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '2fr 40px 1fr 1fr',
+                      padding: '6px 14px',
+                      fontSize: 12,
+                      cursor: 'pointer',
+                      borderBottom: '1px solid var(--border)',
+                      borderLeft: active
+                        ? '3px solid var(--accent-yellow)'
+                        : '3px solid transparent',
+                      background: active ? 'var(--bg-elevated)' : 'transparent',
+                      color: 'var(--text-primary)',
+                    }}
+                  >
+                    <span
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        paddingRight: 8,
+                      }}
+                    >
+                      {row.contractor_name}
+                    </span>
+                    <span
+                      style={{
+                        textAlign: 'right',
+                        color: 'var(--text-secondary)',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      {row.claim_count}
+                    </span>
+                    <span
+                      style={{
+                        textAlign: 'right',
+                        color: 'var(--text-secondary)',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      {formatCurrency(row.total_estimated)}
+                    </span>
+                    <span
+                      style={{
+                        textAlign: 'right',
+                        color: 'var(--text-secondary)',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      {formatCurrency(row.total_paid)}
+                    </span>
+                  </div>
+                )
+              })}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── main page ─────────────────────────────────────────────────────────────────
 
 export default function ClaimsPage() {
@@ -946,6 +1133,10 @@ export default function ClaimsPage() {
   const [phone, setPhone] = useState<string | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [filterState, setFilterState] = useState<FilterState>(DEFAULT_FILTERS)
+  const [contractorFilter, setContractorFilter] = useState('')
+  const isInitialLoad = useRef(true)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [lastUpdatedLabel, setLastUpdatedLabel] = useState('')
 
   const metaOptions = useMemo(() => {
     const ownersMap: Record<string, true>   = {}
@@ -966,15 +1157,39 @@ export default function ClaimsPage() {
     }
   }, [allClaims])
 
-  // Fetch all open claims once on mount
+  // Fetch open claims on mount and every 2 minutes; silent on background refreshes
   useEffect(() => {
-    setLoadingList(true)
-    fetch('/api/internal/claims')
-      .then((r) => r.json())
-      .then((data: { claims: Claim[] }) => setAllClaims(data.claims ?? []))
-      .catch(console.error)
-      .finally(() => setLoadingList(false))
+    function fetchClaims(silent: boolean) {
+      if (!silent) setLoadingList(true)
+      fetch('/api/internal/claims')
+        .then((r) => r.json())
+        .then((data: { claims: Claim[] }) => {
+          setAllClaims(data.claims ?? [])
+          setLastUpdated(new Date())
+        })
+        .catch(console.error)
+        .finally(() => {
+          if (!silent) setLoadingList(false)
+          isInitialLoad.current = false
+        })
+    }
+    fetchClaims(false)
+    const interval = setInterval(() => fetchClaims(true), 120_000)
+    return () => clearInterval(interval)
   }, [])
+
+  // Update "last updated X ago" label every 30s
+  useEffect(() => {
+    if (!lastUpdated) return
+    const ts = lastUpdated
+    function tick() {
+      const diff = Math.round((Date.now() - ts.getTime()) / 1000)
+      setLastUpdatedLabel(diff < 60 ? `${diff}s ago` : `${Math.floor(diff / 60)}m ago`)
+    }
+    tick()
+    const id = setInterval(tick, 30_000)
+    return () => clearInterval(id)
+  }, [lastUpdated])
 
   // Deep-link: ?claim=FS1872 auto-selects the matching claim
   useEffect(() => {
@@ -1033,14 +1248,21 @@ export default function ClaimsPage() {
       c.account_name?.toLowerCase().includes(s)
     const matchesOwner   = !filterState.owner     || c.owner_name   === filterState.owner
     const matchesDealer  = !filterState.oilDealer || c.account_name === filterState.oilDealer
-    const matchesStage   = !filterState.stage     || c.stage        === filterState.stage
+    const matchesStage = !filterState.stage
+      ? true
+      : filterState.stage === '__pending_ust_pull__'
+        ? c.claim_status === 'ust_pre_tank' && ['Service Fee Billed', 'Attendance Deployed'].includes(c.stage ?? '')
+        : filterState.stage === '__pre_remediation__'
+          ? c.claim_status === 'ust_pre_tank' && !['Service Fee Billed', 'Attendance Deployed'].includes(c.stage ?? '')
+          : c.stage === filterState.stage
     const matchesTrigger = !filterState.trigger   || c.claim_trigger === filterState.trigger
     const dr = c.date_claim_is_reported ?? ''
     const matchesFrom = !filterState.dateFrom || dr >= filterState.dateFrom
     const matchesTo   = !filterState.dateTo   || dr <= filterState.dateTo
+    const matchesContractor = !contractorFilter || c.contractor_name === contractorFilter
     return matchesPipeline && matchesSearch &&
            matchesOwner && matchesDealer && matchesStage && matchesTrigger &&
-           matchesFrom && matchesTo
+           matchesFrom && matchesTo && matchesContractor
   })
 
   const sorted = [...filtered].sort((a, b) => {
@@ -1086,6 +1308,7 @@ export default function ClaimsPage() {
           search={search}
           setSearch={setSearch}
           counts={counts}
+          lastUpdatedLabel={lastUpdatedLabel}
         />
         <AdvancedFilterBar
           owners={metaOptions.owners}
@@ -1095,6 +1318,42 @@ export default function ClaimsPage() {
           filters={filterState}
           onChange={setFilterState}
         />
+
+        {/* Active contractor filter chip */}
+        {contractorFilter && (
+          <div
+            style={{
+              padding: '4px 14px',
+              background: 'rgba(232,200,74,0.07)',
+              borderBottom: '1px solid var(--border)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ color: 'var(--text-tertiary)' }}>Contractor:</span>
+            <span style={{ color: 'var(--accent-yellow)', fontWeight: 600, flex: 1 }}>
+              {contractorFilter}
+            </span>
+            <button
+              onClick={() => setContractorFilter('')}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--text-tertiary)',
+                fontSize: 16,
+                lineHeight: 1,
+                padding: '0 2px',
+              }}
+              aria-label="Clear contractor filter"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {/* Scrollable claim list */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -1117,6 +1376,11 @@ export default function ClaimsPage() {
             ))
           )}
         </div>
+
+        <ContractorSection
+          contractorFilter={contractorFilter}
+          setContractorFilter={setContractorFilter}
+        />
 
         {/* Count footer */}
         <div
