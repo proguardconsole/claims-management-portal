@@ -97,6 +97,25 @@ function isStale(modifiedTime: string | null): boolean {
   return Date.now() - new Date(modifiedTime).getTime() > 14 * 24 * 60 * 60 * 1000
 }
 
+function ustStatusLabel(
+  claim: Claim,
+): { label: string; color: string; border: string } | null {
+  if (claim.tank_type !== 'UST' || !claim.claim_status) return null
+  if (
+    claim.claim_status === 'ust_pre_tank' &&
+    ['Service Fee Billed', 'Attendance Deployed'].includes(claim.stage ?? '')
+  ) {
+    return { label: 'Pending UST Pull', color: 'var(--accent-amber)', border: 'var(--accent-amber)' }
+  }
+  if (claim.claim_status === 'ust_pre_tank') {
+    return { label: 'Pre-Remediation', color: 'var(--text-secondary)', border: 'var(--border-bright)' }
+  }
+  if (claim.claim_status === 'ust_open') {
+    return { label: 'Open UST Claim', color: '#60A5FA', border: '#60A5FA' }
+  }
+  return null
+}
+
 // ─── sub-components ────────────────────────────────────────────────────────────
 
 function InfoLabel({ children }: { children: React.ReactNode }) {
@@ -219,7 +238,7 @@ function ClaimRow({
           .join(' · ') || '—'}
       </div>
 
-      {/* Row 4 — owner · time · tank badge */}
+      {/* Row 4 — owner · time · status + tank badge */}
       <div
         style={{
           display: 'flex',
@@ -230,21 +249,42 @@ function ClaimRow({
         <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
           {claim.owner_name ?? '—'} · {timeAgo(claim.modified_time)}
         </span>
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.06em',
-            color: claim.tank_type === 'AST' ? 'var(--accent-yellow)' : '#60A5FA',
-            border: `1px solid ${
-              claim.tank_type === 'AST' ? 'var(--accent-yellow)' : '#60A5FA'
-            }`,
-            borderRadius: 3,
-            padding: '1px 5px',
-            opacity: 0.75,
-          }}
-        >
-          {claim.tank_type ?? '?'}
+        <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          {(() => {
+            const ust = ustStatusLabel(claim)
+            return ust ? (
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: '0.06em',
+                  color: ust.color,
+                  border: `1px solid ${ust.border}`,
+                  borderRadius: 3,
+                  padding: '1px 4px',
+                  opacity: 0.9,
+                }}
+              >
+                {ust.label}
+              </span>
+            ) : null
+          })()}
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              color: claim.tank_type === 'AST' ? 'var(--accent-yellow)' : '#60A5FA',
+              border: `1px solid ${
+                claim.tank_type === 'AST' ? 'var(--accent-yellow)' : '#60A5FA'
+              }`,
+              borderRadius: 3,
+              padding: '1px 5px',
+              opacity: 0.75,
+            }}
+          >
+            {claim.tank_type ?? '?'}
+          </span>
         </span>
       </div>
     </div>
@@ -412,6 +452,23 @@ function ClaimDetail({
             >
               {claim.stage ?? '—'}
             </span>
+            {(() => {
+              const ust = ustStatusLabel(claim)
+              return ust ? (
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: ust.color,
+                    border: `1px solid ${ust.border}`,
+                    borderRadius: 4,
+                    padding: '3px 10px',
+                  }}
+                >
+                  {ust.label}
+                </span>
+              ) : null
+            })()}
             {claim.emergency && (
               <span
                 style={{

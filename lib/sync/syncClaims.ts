@@ -54,6 +54,8 @@ function computeClaimStatus(record: ZohoRecord): string {
   if (inferredTankType === 'AST') {
     if (stage === 'Complete') return 'ast_completed'
     if (stage === 'Claim Denied') return 'ast_denied'
+    const dealName = str(record.Deal_Name) ?? ''
+    if (dealName.toLowerCase().includes('inspection')) return 'inspection'
     return 'ast_open'
   }
 
@@ -66,12 +68,22 @@ function computeClaimStatus(record: ZohoRecord): string {
     return 'ust_pre_tank'
   }
 
+  // TODO: Septic pipeline
+  // When the Zoho "Septic Claims" pipeline is configured, add a third branch here:
+  // if (inferredTankType === 'SEPTIC') {
+  //   if (stage === 'Complete') return 'septic_closed'
+  //   if (stage === 'Claim Denied') return 'septic_denied'
+  //   return 'septic_open'
+  // }
+  // Also add 'septic_open' to OPEN_STATUSES in /api/claims/route.ts when ready.
+
   // Fallback for any remaining null tank_type records
   return 'unknown'
 }
 
 function mapRecord(record: ZohoRecord, syncedAt: string) {
   const id = str(record.id) ?? ''
+  const claimStatus = computeClaimStatus(record)
   return {
     id,
     field_service_number: str(record.Field_Service_Number),
@@ -106,7 +118,7 @@ function mapRecord(record: ZohoRecord, syncedAt: string) {
     total_claim_costs: typeof record.Total_Claim_Costs === 'number' ? record.Total_Claim_Costs : null,
     deductible_paid: typeof record.Deductible_Paid === 'boolean' ? record.Deductible_Paid : null,
     service_fee_paid: typeof record.Service_Fee_Paid === 'boolean' ? record.Service_Fee_Paid : null,
-    record_type: str(record.Type) ?? 'Claim',
+    record_type: claimStatus === 'inspection' ? 'Inspection' : (str(record.Type) ?? 'Claim'),
     claim_denied: record.Claim_Denied === true,
     adjuster_name: nested(record.Claims_Adjuster, 'name'),
     adjuster_id: nested(record.Claims_Adjuster, 'id'),
@@ -120,7 +132,7 @@ function mapRecord(record: ZohoRecord, syncedAt: string) {
     deductible_paid_date: str(record.Deductible_Paid_Date),
     service_fee_paid_date: str(record.Service_Fee_Paid_Date),
     zoho_deep_link: getClaimDeepLink(id),
-    claim_status: computeClaimStatus(record),
+    claim_status: claimStatus,
     synced_at: syncedAt,
   }
 }

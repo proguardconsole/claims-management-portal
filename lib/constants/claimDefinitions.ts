@@ -34,3 +34,6 @@ export type ClaimStatus =
   | 'ust_pre_tank'
   | 'ust_open'
   | 'ust_closed'
+  | 'septic_open'
+  | 'septic_closed'
+  | 'septic_denied'
