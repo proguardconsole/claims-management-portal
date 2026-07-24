@@ -102,7 +102,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Net Flow — claim payments within the selected period
     sb
       .from('claim_payments')
-      .select('amount, payment_type, incoming_or_outgoing, account_name')
+      .select('amount, payment_type, incoming_or_outgoing, account_name, related_type')
       .not('claim_id', 'is', null)
       .gte('payment_date', since),
   ])
@@ -359,7 +359,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   // ── Net Flow ──────────────────────────────────────────────────────────────────
 
-  type PayRow = { amount: number | null; payment_type: string | null; incoming_or_outgoing: string | null; account_name: string | null }
+  type PayRow = { amount: number | null; payment_type: string | null; incoming_or_outgoing: string | null; account_name: string | null; related_type: string | null }
   const allPayments = (financialRes.data ?? []) as PayRow[]
 
   const paidToDate = allPayments
@@ -371,11 +371,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .reduce((s, p) => s + (p.amount ?? 0), 0)
 
   const toContractor = allPayments
-    .filter((p) => p.payment_type === 'Claim Payout' && p.incoming_or_outgoing === 'Outgoing' && p.account_name === null)
+    .filter((p) => p.payment_type === 'Claim Payout' && p.incoming_or_outgoing === 'Outgoing' && p.related_type === 'Contractor' && p.account_name !== 'Claim Adjusters' && p.account_name !== 'Claim Adjusters - Recoverable from Carrier')
     .reduce((s, p) => s + (p.amount ?? 0), 0)
 
-  const unspecified = allPayments
-    .filter((p) => p.payment_type === 'Claim Payout' && p.incoming_or_outgoing === 'Outgoing' && p.account_name !== null && p.account_name !== 'Claim Adjusters' && p.account_name !== 'Claim Adjusters - Recoverable from Carrier')
+  const toCustomer = allPayments
+    .filter((p) => p.payment_type === 'Claim Payout' && p.incoming_or_outgoing === 'Outgoing' && p.related_type === 'Policy Holder')
+    .reduce((s, p) => s + (p.amount ?? 0), 0)
+
+  const toProvider = allPayments
+    .filter((p) => p.payment_type === 'Claim Payout' && p.incoming_or_outgoing === 'Outgoing' && p.related_type === 'Provider')
+    .reduce((s, p) => s + (p.amount ?? 0), 0)
+
+  const toOther = allPayments
+    .filter((p) => p.payment_type === 'Claim Payout' && p.incoming_or_outgoing === 'Outgoing' && p.account_name !== 'Claim Adjusters' && p.account_name !== 'Claim Adjusters - Recoverable from Carrier' && p.related_type !== 'Contractor' && p.related_type !== 'Policy Holder' && p.related_type !== 'Provider')
     .reduce((s, p) => s + (p.amount ?? 0), 0)
 
   const deductibleReceived = allPayments
@@ -416,7 +424,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       paidToDate,
       fromCarrier,
       toContractor,
-      unspecified,
+      toCustomer,
+      toProvider,
+      toOther,
       deductibleReceived,
       serviceFeeReceived,
       totalReceived,

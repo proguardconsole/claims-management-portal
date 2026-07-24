@@ -44,7 +44,9 @@ type KpiData = {
     paidToDate: number
     fromCarrier: number
     toContractor: number
-    unspecified: number
+    toCustomer: number
+    toProvider: number
+    toOther: number
     deductibleReceived: number
     serviceFeeReceived: number
     totalReceived: number
@@ -595,9 +597,11 @@ export default function KpiSummaryPage() {
             <div style={{ flex: 1, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, padding: '14px 16px' }}>
               <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-tertiary)', marginBottom: 10 }}>Paid to Date breakdown</div>
               {[
-                { label: 'From Carrier', value: kpis.netFlow?.fromCarrier },
+                { label: 'From Carrier',  value: kpis.netFlow?.fromCarrier },
                 { label: 'To Contractor', value: kpis.netFlow?.toContractor },
-                { label: 'Unspecified', value: kpis.netFlow?.unspecified },
+                { label: 'To Customer',   value: kpis.netFlow?.toCustomer },
+                { label: 'To Provider',   value: kpis.netFlow?.toProvider },
+                { label: 'Other',         value: kpis.netFlow?.toOther },
               ].map(({ label, value }) => (
                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 6, marginBottom: 6, borderBottom: '1px solid var(--border)' }}>
                   <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{label}</span>

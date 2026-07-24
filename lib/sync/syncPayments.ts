@@ -50,6 +50,7 @@ function mapRecord(record: ZohoRecord, syncedAt: string) {
     note: str(record.Note),
     account_name: nested(record.Account, 'name'),
     payment_type: str(record.Payment_Type),
+    related_type: str(record.Related_Type),
     synced_at: syncedAt,
   }
 }
