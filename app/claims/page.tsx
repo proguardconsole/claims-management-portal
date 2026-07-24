@@ -31,7 +31,9 @@ type Claim = {
   claim_trigger: string | null
   description: string | null
   estimate_total: number | null
-  payment_total: number | null
+  paid_to_date: number | null
+  from_carrier: number | null
+  received_to_date: number | null
   contractor_name: string | null
 }
 
@@ -39,7 +41,7 @@ type ContractorRow = {
   contractor_name: string
   claim_count: number
   total_estimated: number
-  total_paid: number
+  total_paid_to_date: number
 }
 
 type StageEvent = {
@@ -302,6 +304,8 @@ function ClaimRow({
 function FilterBar({
   pipeline,
   setPipeline,
+  ustView,
+  setUstView,
   search,
   setSearch,
   counts,
@@ -309,9 +313,11 @@ function FilterBar({
 }: {
   pipeline: 'all' | 'AST' | 'UST'
   setPipeline: (p: 'all' | 'AST' | 'UST') => void
+  ustView: 'open' | 'pending'
+  setUstView: (v: 'open' | 'pending') => void
   search: string
   setSearch: (s: string) => void
-  counts: { all: number; ast: number; ust: number }
+  counts: { all: number; ast: number; ust: number; ustOpen: number; pendingPull: number }
   lastUpdatedLabel?: string
 }) {
   const tabs: { key: 'all' | 'AST' | 'UST'; label: string; count: number }[] = [
@@ -364,6 +370,37 @@ function FilterBar({
           </span>
         )}
       </div>
+      {pipeline === 'UST' && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+          {(
+            [
+              { key: 'open' as const, label: 'Open Claims', count: counts.ustOpen },
+              { key: 'pending' as const, label: 'Pending Pull', count: counts.pendingPull },
+            ] as { key: 'open' | 'pending'; label: string; count: number }[]
+          ).map(({ key, label, count }) => {
+            const active = ustView === key
+            return (
+              <button
+                key={key}
+                onClick={() => setUstView(key)}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: 11,
+                  fontWeight: active ? 700 : 500,
+                  cursor: 'pointer',
+                  background: active ? 'var(--bg-elevated)' : 'var(--bg-surface)',
+                  color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  border: `1px solid ${active ? 'var(--border-bright)' : 'var(--border)'}`,
+                  borderLeft: active ? '3px solid var(--accent-yellow)' : '3px solid transparent',
+                  borderRadius: 4,
+                }}
+              >
+                {label} · {count}
+              </button>
+            )
+          })}
+        </div>
+      )}
       <input
         type="text"
         value={search}
@@ -585,27 +622,37 @@ function ClaimDetail({
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(2, 1fr)',
+          gridTemplateColumns: 'repeat(3, 1fr)',
           gap: 10,
           marginBottom: 14,
         }}
       >
         {(() => {
           const est = claim.estimate_total ?? 0
-          const paid = claim.payment_total ?? 0
+          const ptd = claim.paid_to_date ?? 0
+          const fc  = claim.from_carrier ?? 0
+          const rtd = claim.received_to_date ?? 0
           return [
             {
               label: 'Estimate',
               value: formatCurrency(est),
               color: 'var(--text-primary)',
+              subLine: null as string | null,
             },
             {
               label: 'Paid to Date',
-              value: formatCurrency(paid),
-              color: paid >= est ? 'var(--accent-amber)' : 'var(--accent-green)',
+              value: formatCurrency(ptd),
+              color: 'var(--text-primary)',
+              subLine: `↳ From Carrier: ${formatCurrency(fc)}`,
+            },
+            {
+              label: 'Received to Date',
+              value: formatCurrency(rtd),
+              color: 'var(--accent-green)',
+              subLine: null as string | null,
             },
           ]
-        })().map(({ label, value, color }) => (
+        })().map(({ label, value, color, subLine }) => (
           <div
             key={label}
             style={{
@@ -637,6 +684,11 @@ function ClaimDetail({
             >
               {value}
             </div>
+            {subLine && (
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                {subLine}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -1104,7 +1156,7 @@ function ContractorSection({
                         fontVariantNumeric: 'tabular-nums',
                       }}
                     >
-                      {formatCurrency(row.total_paid)}
+                      {formatCurrency(row.total_paid_to_date)}
                     </span>
                   </div>
                 )
@@ -1125,6 +1177,7 @@ export default function ClaimsPage() {
   const [allClaims, setAllClaims] = useState<Claim[]>([])
   const [loadingList, setLoadingList] = useState(true)
   const [pipeline, setPipeline] = useState<'all' | 'AST' | 'UST'>('all')
+  const [ustView, setUstView] = useState<'open' | 'pending'>('open')
   const [search, setSearch] = useState('')
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null)
 
@@ -1231,11 +1284,13 @@ export default function ClaimsPage() {
   }, [selectedClaim?.id])
 
   // Client-side filter + sort
+  const PENDING_STAGES = ['Service Fee Billed', 'Attendance Deployed', 'Needs Analysis']
   const filtered = allClaims.filter((c) => {
     const matchesPipeline =
       pipeline === 'all' ||
       (pipeline === 'AST' && c.tank_type === 'AST') ||
-      (pipeline === 'UST' && c.tank_type === 'UST')
+      (pipeline === 'UST' && c.tank_type === 'UST' && ustView === 'open' && c.claim_status === 'ust_open') ||
+      (pipeline === 'UST' && c.tank_type === 'UST' && ustView === 'pending' && PENDING_STAGES.includes(c.stage ?? ''))
     const s = search.toLowerCase()
     const matchesSearch =
       !search ||
@@ -1276,9 +1331,11 @@ export default function ClaimsPage() {
   })
 
   const counts = {
-    all: allClaims.length,
-    ast: allClaims.filter((c) => c.tank_type === 'AST').length,
-    ust: allClaims.filter((c) => c.tank_type === 'UST').length,
+    all:         allClaims.length,
+    ast:         allClaims.filter((c) => c.tank_type === 'AST').length,
+    ust:         allClaims.filter((c) => c.tank_type === 'UST').length,
+    ustOpen:     allClaims.filter((c) => c.tank_type === 'UST' && c.claim_status === 'ust_open').length,
+    pendingPull: allClaims.filter((c) => c.tank_type === 'UST' && PENDING_STAGES.includes(c.stage ?? '')).length,
   }
 
   return (
@@ -1305,6 +1362,8 @@ export default function ClaimsPage() {
         <FilterBar
           pipeline={pipeline}
           setPipeline={setPipeline}
+          ustView={ustView}
+          setUstView={setUstView}
           search={search}
           setSearch={setSearch}
           counts={counts}

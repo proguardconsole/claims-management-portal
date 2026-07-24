@@ -5,7 +5,8 @@ import { getServerSupabase } from '../../../lib/supabase/server'
 
 const MS_PER_DAY   = 1000 * 60 * 60 * 24
 const STALE_DAYS   = 14
-const OPEN_STATUSES = ['ast_open', 'ust_open', 'ust_pre_tank'] as const
+const OPEN_STATUSES = ['ast_open', 'ust_open'] as const
+const PENDING_PULL_STATUSES = ['ust_pre_tank'] as const
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       'id, field_service_number, deal_name, stage, tank_type, claim_status, owner_name, modified_time, created_time',
     )
     .in('claim_status', [...OPEN_STATUSES])
+    .not('owner_name', 'ilike', '%admin%')
     .lt('modified_time', threshold)
     .eq('record_type', 'Claim')
     .not('modified_time', 'is', null)

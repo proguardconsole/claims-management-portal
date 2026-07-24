@@ -48,6 +48,7 @@ function mapRecord(record: ZohoRecord, syncedAt: string) {
     reference_number: str(record.Reference_Number),
     policy_id: nested(record.Policy, 'id'),
     note: str(record.Note),
+    account_name: nested(record.Account, 'name'),
     synced_at: syncedAt,
   }
 }

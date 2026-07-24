@@ -104,13 +104,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .select('id, field_service_number, deal_name, owner_name, stage, modified_time, tank_type, emergency')
         .eq('record_type', 'Claim')
         .not('stage', 'in', CLOSED_STAGES_TUPLE)
-        .not('modified_time', 'is', null),
+        .not('modified_time', 'is', null)
+        .not('owner_name', 'ilike', '%admin%'),
 
       // 2. Opened this period
       sb
         .from('claims')
         .select('tank_type')
         .eq('record_type', 'Claim')
+        .not('owner_name', 'ilike', '%admin%')
         .gte('created_time', start.toISOString()),
 
       // 3. Opened previous period
@@ -118,13 +120,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .from('claims')
         .select('tank_type')
         .eq('record_type', 'Claim')
+        .not('owner_name', 'ilike', '%admin%')
         .gte('created_time', prevStart.toISOString())
         .lt('created_time', start.toISOString()),
 
       // 4. All claims — pipeline lookup for financial and closed-event joins
       sb
         .from('claims')
-        .select('id, tank_type'),
+        .select('id, tank_type')
+        .not('owner_name', 'ilike', '%admin%'),
 
       // 5. Closed events this period + prev period (split in JS at start)
       sb
@@ -149,7 +153,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       // 8. Payments
       sb
         .from('claim_payments')
-        .select('claim_id, amount')
+        .select('claim_id, amount, incoming_or_outgoing, account_name')
         .not('claim_id', 'is', null),
 
       // 9. YTD closed claims — denial rate + denied this period
@@ -158,6 +162,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .select('stage, modified_time')
         .eq('record_type', 'Claim')
         .in('stage', CLOSED_STAGES_ARRAY)
+        .not('owner_name', 'ilike', '%admin%')
         .gte('modified_time', yearStart.toISOString())
         .not('modified_time', 'is', null),
 
@@ -166,6 +171,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .from('claims')
         .select('claim_denied_reason')
         .eq('stage', 'Claim Denied')
+        .not('owner_name', 'ilike', '%admin%')
         .not('claim_denied_reason', 'is', null),
 
       // 11. Last synced — MAX(modified_time) proxy
@@ -415,15 +421,28 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       estByPipeline[pipeline].total_adjuster_fees    += (e.adjuster_fees     as number) ?? 0
     }
 
-    const pmtByPipeline: Record<string, number> = {}
+    type PmtByPipelineAgg = { paid_to_date: number; from_carrier: number; received_to_date: number }
+    const pmtByPipeline: Record<string, PmtByPipelineAgg> = {}
     for (const p of paymentsRes.data ?? []) {
       const pipeline = pipelineByClaimId[p.claim_id ?? ''] ?? 'Other'
-      pmtByPipeline[pipeline] = (pmtByPipeline[pipeline] ?? 0) + ((p.amount as number) ?? 0)
+      if (!pmtByPipeline[pipeline]) pmtByPipeline[pipeline] = { paid_to_date: 0, from_carrier: 0, received_to_date: 0 }
+      const amt = (p.amount as number) ?? 0
+      if (p.incoming_or_outgoing === 'Outgoing' && p.account_name !== 'Claim Adjusters') {
+        pmtByPipeline[pipeline].paid_to_date += amt
+      }
+      if (p.incoming_or_outgoing === 'Outgoing' && p.account_name === 'Claim Adjusters - Recoverable from Carrier') {
+        pmtByPipeline[pipeline].from_carrier += amt
+      }
+      if (p.incoming_or_outgoing === 'Incoming') {
+        pmtByPipeline[pipeline].received_to_date += amt
+      }
     }
 
-    const totalEstimated = Object.values(estByPipeline).reduce((s, e) => s + e.total_estimated, 0)
-    const totalPaid      = Object.values(pmtByPipeline).reduce((s, n) => s + n, 0)
-    const collectionRate = totalEstimated > 0 ? round1((totalPaid / totalEstimated) * 100) : 0
+    const totalEstimated   = Object.values(estByPipeline).reduce((s, e) => s + e.total_estimated, 0)
+    const totalPaidToDate  = Object.values(pmtByPipeline).reduce((s, n) => s + n.paid_to_date, 0)
+    const totalFromCarrier = Object.values(pmtByPipeline).reduce((s, n) => s + n.from_carrier, 0)
+    const totalReceived    = Object.values(pmtByPipeline).reduce((s, n) => s + n.received_to_date, 0)
+    const collectionRate   = totalEstimated > 0 ? round1((totalReceived / totalEstimated) * 100) : 0
 
     const contractorCosts = Object.values(estByPipeline).reduce((s, e) => s + e.total_contractor_costs, 0)
     const stateFees       = Object.values(estByPipeline).reduce((s, e) => s + e.total_state_fees, 0)
@@ -436,9 +455,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const byPipeline = Object.keys(pipelineUnion)
       .filter((p) => p === 'AST' || p === 'UST')
       .map((p) => ({
-        pipeline:  p,
-        estimated: round1(estByPipeline[p]?.total_estimated ?? 0),
-        collected: round1(pmtByPipeline[p] ?? 0),
+        pipeline:         p,
+        estimated:        round1(estByPipeline[p]?.total_estimated ?? 0),
+        paid_to_date:     round1(pmtByPipeline[p]?.paid_to_date ?? 0),
+        from_carrier:     round1(pmtByPipeline[p]?.from_carrier ?? 0),
+        received_to_date: round1(pmtByPipeline[p]?.received_to_date ?? 0),
       }))
       .sort((a, b) => a.pipeline.localeCompare(b.pipeline))
 
@@ -515,7 +536,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       agents,
       financial: {
         total_estimated:     round1(totalEstimated),
-        total_paid:          round1(totalPaid),
+        total_paid:          round1(totalPaidToDate),
+        total_from_carrier:  round1(totalFromCarrier),
+        total_received:      round1(totalReceived),
         collection_rate_pct: collectionRate,
         contractor_costs:    round1(contractorCosts),
         state_fees:          round1(stateFees),

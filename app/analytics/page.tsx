@@ -78,12 +78,16 @@ type FinancialEstimate = {
 type FinancialPayment = {
   pipeline: string
   claims_with_payments: number
-  total_paid: number
+  total_paid_to_date: number
+  total_from_carrier: number
+  total_received_to_date: number
 }
 
 type FinancialTotals = {
   total_estimated: number
   total_paid: number
+  total_from_carrier: number
+  total_received: number
   collection_rate_pct: number
 }
 
@@ -286,7 +290,7 @@ function groupReasons(reasons: DenialReason[], max = 6): GroupedReason[] {
 
 function buildFinancialChartData(financial: FinancialData): FinancialChartDatum[] {
   const paymentByPipeline: Record<string, number> = {}
-  for (const p of financial.payments) paymentByPipeline[p.pipeline] = p.total_paid
+  for (const p of financial.payments) paymentByPipeline[p.pipeline] = p.total_paid_to_date
   return financial.estimates
     .filter((e) => e.pipeline === 'AST' || e.pipeline === 'UST')
     .map((e) => ({
@@ -1845,8 +1849,10 @@ function FinancialExposureSection({ financial }: { financial: FinancialData }) {
       {/* Stat tiles */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
         {[
-          { label: 'Total estimated',  value: fmtDollar(totals.total_estimated), color: 'var(--text-primary)' },
-          { label: 'Total collected',  value: fmtDollar(totals.total_paid),      color: 'var(--text-primary)' },
+          { label: 'Total estimated',  value: fmtDollar(totals.total_estimated),    color: 'var(--text-primary)' },
+          { label: 'Total paid out',   value: fmtDollar(totals.total_paid),         color: 'var(--text-primary)' },
+          { label: 'From carrier',     value: fmtDollar(totals.total_from_carrier), color: 'var(--text-primary)' },
+          { label: 'Received to date', value: fmtDollar(totals.total_received),     color: 'var(--text-primary)' },
           { label: 'Collection rate',
             value: `${totals.collection_rate_pct.toFixed(1)}%`,
             color: collectionRateColor(totals.collection_rate_pct) },
@@ -2095,6 +2101,7 @@ function AgentWorkloadSection({ rows }: { rows: AgentRow[] }) {
             <table
               style={{
                 width: '100%',
+                tableLayout: 'fixed',
                 borderCollapse: 'separate',
                 borderSpacing: '0 2px',
               }}
@@ -2722,9 +2729,11 @@ export default function AnalyticsPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             <BottleneckFunnel rows={bottleneck} />
             <StaleTriageChart rows={stale} />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 24 }}>
               <StaleChecklist claims={staleChecklist} loading={false} />
-              <AgentWorkloadSection rows={agentRows} />
+              <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                <AgentWorkloadSection rows={agentRows} />
+              </div>
             </div>
           </div>
         )

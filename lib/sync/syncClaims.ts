@@ -62,9 +62,14 @@ function computeClaimStatus(record: ZohoRecord): string {
   if (inferredTankType === 'UST') {
     if (stage === 'Complete') return 'ust_closed'
     if (stage === 'Claim Denied') return 'ust_closed'
+    // Claim Form Completed + PTR=No → closed (claim did not proceed)
+    if (stage === 'Claim Form Completed' && proceedToRemediation !== 'Yes') return 'ust_closed'
+    // Pre-tank stages → pending pull (not yet a claim)
     const preTankStages = ['Needs Analysis', 'Service Fee Billed', 'Attendance Deployed']
     if (preTankStages.includes(stage)) return 'ust_pre_tank'
+    // PTR=Yes → open claim
     if (proceedToRemediation === 'Yes') return 'ust_open'
+    // Fallthrough
     return 'ust_pre_tank'
   }
 

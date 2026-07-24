@@ -57,7 +57,8 @@ async function viewDwell(sb: SB, pipelineFilter?: string) {
       .not('stage', 'in', CLOSED_STAGES_TUPLE),
     sb
       .from('claims')
-      .select('id, tank_type'),
+      .select('id, tank_type')
+      .not('owner_name', 'ilike', '%admin%'),
   ])
 
   if (eventsRes.error) throw new Error(eventsRes.error.message)
@@ -109,6 +110,7 @@ async function viewVolume(sb: SB) {
       .select('created_time, tank_type')
       .gte('created_time', cutoff)
       .eq('record_type', 'Claim')
+      .not('owner_name', 'ilike', '%admin%')
       .not('created_time', 'is', null),
 
     // Terminal stage transitions in last 52 weeks
@@ -122,7 +124,8 @@ async function viewVolume(sb: SB) {
     // Full pipeline lookup for the closed-events join
     sb
       .from('claims')
-      .select('id, tank_type'),
+      .select('id, tank_type')
+      .not('owner_name', 'ilike', '%admin%'),
   ])
 
   if (openedRes.error) throw new Error(openedRes.error.message)
@@ -182,6 +185,7 @@ async function viewBottleneck(sb: SB) {
       .from('claims')
       .select('id, stage, tank_type, modified_time')
       .eq('record_type', 'Claim')
+      .not('owner_name', 'ilike', '%admin%')
       .not('stage', 'in', CLOSED_STAGES_TUPLE),
     // Fetch all events — avoids long IN(...) param with 900+ claim IDs
     sb
@@ -247,6 +251,7 @@ async function viewStale(sb: SB) {
     .from('claims')
     .select('tank_type, modified_time')
     .eq('record_type', 'Claim')
+    .not('owner_name', 'ilike', '%admin%')
     .not('stage', 'in', CLOSED_STAGES_TUPLE)
     .not('modified_time', 'is', null)
 
@@ -302,11 +307,12 @@ async function viewFinancial(sb: SB) {
       .not('claim_id', 'is', null),
     sb
       .from('claim_payments')
-      .select('claim_id, amount')
+      .select('claim_id, amount, incoming_or_outgoing, account_name')
       .not('claim_id', 'is', null),
     sb
       .from('claims')
-      .select('id, tank_type'),
+      .select('id, tank_type')
+      .not('owner_name', 'ilike', '%admin%'),
   ])
 
   if (estimatesRes.error) throw new Error(estimatesRes.error.message)
@@ -361,34 +367,54 @@ async function viewFinancial(sb: SB) {
   })
 
   // Payments aggregation
-  type PmtAgg = { claimsSet: Record<string, true>; total_paid: number }
+  type PmtAgg = {
+    claimsSet: Record<string, true>
+    total_paid_to_date: number
+    total_from_carrier: number
+    total_received_to_date: number
+  }
   const pmtAgg: Record<string, PmtAgg> = {}
 
   for (const p of paymentsRes.data ?? []) {
     const pipeline = pipelineByClaimId[p.claim_id ?? ''] ?? 'Other'
-    if (!pmtAgg[pipeline]) pmtAgg[pipeline] = { claimsSet: {}, total_paid: 0 }
+    if (!pmtAgg[pipeline]) pmtAgg[pipeline] = { claimsSet: {}, total_paid_to_date: 0, total_from_carrier: 0, total_received_to_date: 0 }
     if (p.claim_id) pmtAgg[pipeline].claimsSet[p.claim_id] = true
-    pmtAgg[pipeline].total_paid += (p.amount as number) ?? 0
+    const amt = (p.amount as number) ?? 0
+    if (p.incoming_or_outgoing === 'Outgoing' && p.account_name !== 'Claim Adjusters') {
+      pmtAgg[pipeline].total_paid_to_date += amt
+    }
+    if (p.incoming_or_outgoing === 'Outgoing' && p.account_name === 'Claim Adjusters - Recoverable from Carrier') {
+      pmtAgg[pipeline].total_from_carrier += amt
+    }
+    if (p.incoming_or_outgoing === 'Incoming') {
+      pmtAgg[pipeline].total_received_to_date += amt
+    }
   }
 
   const payments = Object.keys(pmtAgg).map((pipeline) => ({
     pipeline,
-    claims_with_payments: Object.keys(pmtAgg[pipeline].claimsSet).length,
-    total_paid: round1(pmtAgg[pipeline].total_paid),
+    claims_with_payments:   Object.keys(pmtAgg[pipeline].claimsSet).length,
+    total_paid_to_date:     round1(pmtAgg[pipeline].total_paid_to_date),
+    total_from_carrier:     round1(pmtAgg[pipeline].total_from_carrier),
+    total_received_to_date: round1(pmtAgg[pipeline].total_received_to_date),
   }))
 
   // Cross-pipeline totals
-  const total_estimated = estimates.reduce((s, r) => s + r.total_estimated, 0)
-  const total_paid      = payments.reduce((s, r) => s + r.total_paid, 0)
+  const total_estimated    = estimates.reduce((s, r) => s + r.total_estimated, 0)
+  const total_paid_to_date = payments.reduce((s, r) => s + r.total_paid_to_date, 0)
+  const total_from_carrier = payments.reduce((s, r) => s + r.total_from_carrier, 0)
+  const total_received     = payments.reduce((s, r) => s + r.total_received_to_date, 0)
   const collection_rate_pct =
-    total_estimated > 0 ? round1((total_paid / total_estimated) * 100) : 0
+    total_estimated > 0 ? round1((total_received / total_estimated) * 100) : 0
 
   return {
     estimates,
     payments,
     totals: {
-      total_estimated: round1(total_estimated),
-      total_paid:      round1(total_paid),
+      total_estimated:     round1(total_estimated),
+      total_paid:          round1(total_paid_to_date),
+      total_from_carrier:  round1(total_from_carrier),
+      total_received:      round1(total_received),
       collection_rate_pct,
     },
   }
@@ -404,6 +430,7 @@ async function viewAgents(sb: SB) {
     .eq('record_type', 'Claim')
     .not('stage', 'in', CLOSED_STAGES_TUPLE)
     .not('modified_time', 'is', null)
+    .not('owner_name', 'ilike', '%admin%')
 
   if (error) throw new Error(error.message)
 
@@ -473,11 +500,13 @@ async function viewDenials(sb: SB) {
       .eq('record_type', 'Claim')
       .in('stage', CLOSED_STAGES_ARRAY)
       .gte('modified_time', cutoff.toISOString())
-      .not('modified_time', 'is', null),
+      .not('modified_time', 'is', null)
+      .not('owner_name', 'ilike', '%admin%'),
     sb
       .from('claims')
       .select('claim_denied_reason')
       .eq('stage', 'Claim Denied')
+      .not('owner_name', 'ilike', '%admin%')
       .not('claim_denied_reason', 'is', null),
   ])
 

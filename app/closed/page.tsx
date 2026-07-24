@@ -29,7 +29,9 @@ type ClosedClaim = {
   description: string | null
   claim_trigger: string | null
   estimate_total: number | null
-  payment_total: number | null
+  paid_to_date: number | null
+  from_carrier: number | null
+  received_to_date: number | null
 }
 
 type StageEvent = {
@@ -488,30 +490,40 @@ function ClaimDetail({
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          gridTemplateColumns: 'repeat(4, 1fr)',
           gap: 10,
           marginBottom: 14,
         }}
       >
         {(() => {
           const est = claim.estimate_total ?? 0
-          const paid = claim.payment_total ?? 0
-          const diff = paid - est
+          const ptd = claim.paid_to_date ?? 0
+          const fc  = claim.from_carrier ?? 0
+          const rtd = claim.received_to_date ?? 0
+          const diff = ptd - est
           return [
             {
               label: 'Original Estimate',
               value: formatCurrency(est),
               color: 'var(--text-primary)',
+              subLine: null as string | null,
             },
             {
-              label: 'Total Paid',
-              value: formatCurrency(paid),
+              label: 'Paid to Date',
+              value: formatCurrency(ptd),
               color: 'var(--accent-green)',
+              subLine: `↳ From Carrier: ${formatCurrency(fc)}`,
+            },
+            {
+              label: 'Received to Date',
+              value: formatCurrency(rtd),
+              color: 'var(--accent-green)',
+              subLine: null as string | null,
             },
             {
               label: 'Difference',
               value:
-                est === 0 && paid === 0
+                est === 0 && ptd === 0
                   ? '—'
                   : diff === 0
                     ? '$0'
@@ -519,14 +531,15 @@ function ClaimDetail({
                       ? `-${formatCurrency(-diff)}`
                       : `+${formatCurrency(diff)}`,
               color:
-                est === 0 && paid === 0
+                est === 0 && ptd === 0
                   ? 'var(--text-tertiary)'
                   : diff < 0
                     ? 'var(--accent-green)'
                     : 'var(--accent-red)',
+              subLine: null as string | null,
             },
           ]
-        })().map(({ label, value, color }) => (
+        })().map(({ label, value, color, subLine }) => (
           <div
             key={label}
             style={{
@@ -558,6 +571,11 @@ function ClaimDetail({
             >
               {value}
             </div>
+            {subLine && (
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                {subLine}
+              </div>
+            )}
           </div>
         ))}
       </div>

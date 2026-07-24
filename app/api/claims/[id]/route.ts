@@ -57,15 +57,25 @@ export async function GET(
       .from('claims')
       .select('claim_contact_phone')
       .eq('id', claimId)
+      .not('owner_name', 'ilike', '%admin%')
       .single(),
     sb.from('estimates').select('estimate_total').eq('claim_id', claimId),
-    sb.from('claim_payments').select('amount').eq('claim_id', claimId),
+    sb.from('claim_payments').select('amount, incoming_or_outgoing, account_name').eq('claim_id', claimId),
   ])
 
   const history = historyRes.data ?? []
   const phone = claimRes.data?.claim_contact_phone ?? null
   const estimate_total = (estRes.data ?? []).reduce((s, r) => s + (r.estimate_total ?? 0), 0)
-  const payment_total = (payRes.data ?? []).reduce((s, r) => s + (r.amount ?? 0), 0)
+  const payments = payRes.data ?? []
+  const paid_to_date = payments
+    .filter((p) => p.incoming_or_outgoing === 'Outgoing' && p.account_name !== 'Claim Adjusters')
+    .reduce((s, p) => s + (p.amount ?? 0), 0)
+  const from_carrier = payments
+    .filter((p) => p.incoming_or_outgoing === 'Outgoing' && p.account_name === 'Claim Adjusters - Recoverable from Carrier')
+    .reduce((s, p) => s + (p.amount ?? 0), 0)
+  const received_to_date = payments
+    .filter((p) => p.incoming_or_outgoing === 'Incoming')
+    .reduce((s, p) => s + (p.amount ?? 0), 0)
 
   let calls: CallLog[] = []
   const septicKey = process.env.SEPTIC_GTM_SERVICE_KEY
@@ -118,5 +128,5 @@ export async function GET(
     console.warn('[claim detail] SEPTIC_GTM_SERVICE_KEY not configured — skipping call history')
   }
 
-  return NextResponse.json({ history, calls, phone, estimate_total, payment_total })
+  return NextResponse.json({ history, calls, phone, estimate_total, paid_to_date, from_carrier, received_to_date })
 }

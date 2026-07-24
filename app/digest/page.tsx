@@ -34,7 +34,9 @@ type AgentRow = {
 type ByPipelineRow = {
   pipeline: string
   estimated: number
-  collected: number
+  paid_to_date: number
+  from_carrier: number
+  received_to_date: number
 }
 
 type DenialReason = {
@@ -92,6 +94,8 @@ type DigestPayload = {
   financial: {
     total_estimated: number
     total_paid: number
+    total_from_carrier: number
+    total_received: number
     collection_rate_pct: number
     contractor_costs: number
     state_fees: number
@@ -895,11 +899,13 @@ function FinancialSection({ financial }: { financial: DigestPayload['financial']
   return (
     <SectionCard title="Financial overview" className="page-break-before">
       {/* headline stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 20 }}>
         {[
-          { label: 'Total estimated', value: fmtDollar(financial.total_estimated), color: undefined },
-          { label: 'Total collected', value: fmtDollar(financial.total_paid), color: undefined },
-          { label: 'Collection rate', value: `${financial.collection_rate_pct}%`, color: rateColor },
+          { label: 'Total estimated',  value: fmtDollar(financial.total_estimated),    color: undefined },
+          { label: 'Total paid out',   value: fmtDollar(financial.total_paid),         color: undefined },
+          { label: 'From carrier',     value: fmtDollar(financial.total_from_carrier), color: undefined },
+          { label: 'Received to date', value: fmtDollar(financial.total_received),     color: undefined },
+          { label: 'Collection rate',  value: `${financial.collection_rate_pct}%`,     color: rateColor },
         ].map((stat) => (
           <div
             key={stat.label}
@@ -928,13 +934,14 @@ function FinancialSection({ financial }: { financial: DigestPayload['financial']
               <tr>
                 <th style={TH_STYLE}>Pipeline</th>
                 <th style={TH_RIGHT}>Estimated</th>
-                <th style={TH_RIGHT}>Collected</th>
+                <th style={TH_RIGHT}>Paid Out</th>
+                <th style={TH_RIGHT}>Received</th>
                 <th style={TH_RIGHT}>Rate</th>
               </tr>
             </thead>
             <tbody>
               {financial.by_pipeline.map((row) => {
-                const rate = row.estimated > 0 ? Math.round((row.collected / row.estimated) * 100) : 0
+                const rate = row.estimated > 0 ? Math.round((row.received_to_date / row.estimated) * 100) : 0
                 const rColor = collectionRateColor(rate)
                 return (
                   <tr key={row.pipeline}>
@@ -945,7 +952,10 @@ function FinancialSection({ financial }: { financial: DigestPayload['financial']
                       {fmtDollar(row.estimated)}
                     </td>
                     <td style={{ padding: '8px 0', fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)', textAlign: 'right', background: 'var(--bg-elevated)' }}>
-                      {fmtDollar(row.collected)}
+                      {fmtDollar(row.paid_to_date)}
+                    </td>
+                    <td style={{ padding: '8px 0', fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--text-primary)', textAlign: 'right', background: 'var(--bg-elevated)' }}>
+                      {fmtDollar(row.received_to_date)}
                     </td>
                     <td style={{ padding: '8px 10px 8px 0', fontSize: 13, fontWeight: 600, color: rColor, textAlign: 'right', background: 'var(--bg-elevated)', borderRadius: '0 4px 4px 0' }}>
                       {rate}%

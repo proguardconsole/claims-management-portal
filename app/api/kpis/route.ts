@@ -3,7 +3,8 @@ import { getServerSupabase } from '../../../lib/supabase/server'
 
 // ── constants ──────────────────────────────────────────────────────────────────
 
-const OPEN_STATUSES = ['ast_open', 'ust_open', 'ust_pre_tank'] as const
+const OPEN_STATUSES = ['ast_open', 'ust_open'] as const
+const PENDING_PULL_STATUSES = ['ust_pre_tank'] as const
 const TERMINAL_STAGES = ['Complete', 'Completed', 'Claim Denied'] as const
 const MS_PER_DAY = 1000 * 60 * 60 * 24
 const OVERDUE_DAYS = 14
@@ -56,6 +57,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         'id, field_service_number, claim_status, owner_name, tank_type, stage, modified_time, date_claim_is_reported, created_time, deductible_paid',
       )
       .in('claim_status', [...OPEN_STATUSES])
+      .not('owner_name', 'ilike', '%admin%')
       .not('modified_time', 'is', null),
 
     // Terminal stage transitions within the period — drives closed/denied/avgDaysToClose
@@ -72,6 +74,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .from('claims')
       .select('*', { count: 'exact', head: true })
       .eq('record_type', 'Claim')
+      .not('owner_name', 'ilike', '%admin%')
       .gte('created_time', since),
 
     // Historical stage dwell times — drives bottleneck section

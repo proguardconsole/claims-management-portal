@@ -20,6 +20,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .select('owner_name, account_name, stage, claim_trigger')
       .eq('record_type', 'Claim')
       .in('claim_status', [...CLOSED_STATUSES])
+      .not('owner_name', 'ilike', '%admin%')
     if (metaErr) return NextResponse.json({ error: metaErr.message }, { status: 500 })
     const ownersMap: Record<string, true>   = {}
     const dealersMap: Record<string, true>  = {}
@@ -65,6 +66,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     )
     .eq('record_type', 'Claim')
     .in('claim_status', [...CLOSED_STATUSES])
+    .not('owner_name', 'ilike', '%admin%')
     .order(col, { ascending: asc })
     .range(offset, offset + limit - 1)
 
@@ -110,23 +112,36 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ? sb.from('estimates').select('claim_id, estimate_total').in('claim_id', ids)
       : Promise.resolve({ data: [] as { claim_id: string; estimate_total: number | null }[] }),
     ids.length > 0
-      ? sb.from('claim_payments').select('claim_id, amount').in('claim_id', ids)
-      : Promise.resolve({ data: [] as { claim_id: string; amount: number | null }[] }),
+      ? sb.from('claim_payments').select('claim_id, amount, incoming_or_outgoing, account_name').in('claim_id', ids)
+      : Promise.resolve({ data: [] as { claim_id: string; amount: number | null; incoming_or_outgoing: string | null; account_name: string | null }[] }),
   ])
 
   const estimateMap: Record<string, number> = {}
   for (const e of estRows ?? []) {
     if (e.claim_id) estimateMap[e.claim_id] = (estimateMap[e.claim_id] ?? 0) + (e.estimate_total ?? 0)
   }
-  const paymentMap: Record<string, number> = {}
+  const paidMap: Record<string, number> = {}
+  const carrierMap: Record<string, number> = {}
+  const receivedMap: Record<string, number> = {}
   for (const p of payRows ?? []) {
-    if (p.claim_id) paymentMap[p.claim_id] = (paymentMap[p.claim_id] ?? 0) + (p.amount ?? 0)
+    if (!p.claim_id) continue
+    if (p.incoming_or_outgoing === 'Outgoing' && p.account_name !== 'Claim Adjusters') {
+      paidMap[p.claim_id] = (paidMap[p.claim_id] ?? 0) + (p.amount ?? 0)
+    }
+    if (p.incoming_or_outgoing === 'Outgoing' && p.account_name === 'Claim Adjusters - Recoverable from Carrier') {
+      carrierMap[p.claim_id] = (carrierMap[p.claim_id] ?? 0) + (p.amount ?? 0)
+    }
+    if (p.incoming_or_outgoing === 'Incoming') {
+      receivedMap[p.claim_id] = (receivedMap[p.claim_id] ?? 0) + (p.amount ?? 0)
+    }
   }
 
   const enriched = claims.map((c) => ({
     ...c,
-    estimate_total: estimateMap[c.id] ?? 0,
-    payment_total: paymentMap[c.id] ?? 0,
+    estimate_total:   estimateMap[c.id] ?? 0,
+    paid_to_date:     paidMap[c.id] ?? 0,
+    from_carrier:     carrierMap[c.id] ?? 0,
+    received_to_date: receivedMap[c.id] ?? 0,
   }))
 
   const closed = enriched.filter((c) => c.stage !== 'Claim Denied').length
