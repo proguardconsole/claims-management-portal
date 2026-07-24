@@ -574,7 +574,7 @@ function PipelineCard({
   )
 }
 
-function PipelineHealthSection({ data, periodLabel, periodPhrase }: { data: DigestPayload; periodLabel: string; periodPhrase: string }) {
+function PipelineHealthSection({ data, periodPhrase }: { data: DigestPayload; periodPhrase: string }) {
   return (
     <SectionCard title={`Pipeline health — ${periodPhrase}`}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -996,7 +996,7 @@ function FinancialSection({ financial, periodPhrase }: { financial: DigestPayloa
 
 // ─── section 9: denials ────────────────────────────────────────────────────────
 
-function DenialsSection({ denials, periodLabel, periodPhrase }: { denials: DigestPayload['denials']; periodLabel: string; periodPhrase: string }) {
+function DenialsSection({ denials, periodPhrase }: { denials: DigestPayload['denials']; periodPhrase: string }) {
   const { denied_this_period, ytd_denial_rate_pct, reasons } = denials
   const noDenied = denied_this_period === 0
 
@@ -1592,7 +1592,7 @@ export default function DigestPage() {
           <SnapshotSection data={digest} periodLabel={periodLabel} periodPhrase={periodPhrase} />
 
           {/* ── SECTION 4: pipeline health ──────────────────────────────── */}
-          <PipelineHealthSection data={digest} periodLabel={periodLabel} periodPhrase={periodPhrase} />
+          <PipelineHealthSection data={digest} periodPhrase={periodPhrase} />
 
           {/* ── SECTION 5: bottlenecks ──────────────────────────────────── */}
           <BottlenecksSection bottlenecks={digest.bottlenecks} />
@@ -1607,7 +1607,7 @@ export default function DigestPage() {
           <FinancialSection financial={digest.financial} periodPhrase={periodPhrase} />
 
           {/* ── SECTION 9: denials ──────────────────────────────────────── */}
-          <DenialsSection denials={digest.denials} periodLabel={periodLabel} periodPhrase={periodPhrase} />
+          <DenialsSection denials={digest.denials} periodPhrase={periodPhrase} />
 
         </div>
       </div>
