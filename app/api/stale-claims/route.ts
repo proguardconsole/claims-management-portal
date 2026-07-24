@@ -6,6 +6,7 @@ import { getServerSupabase } from '../../../lib/supabase/server'
 const MS_PER_DAY   = 1000 * 60 * 60 * 24
 const STALE_DAYS   = 14
 const OPEN_STATUSES = ['ast_open', 'ust_open'] as const
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const PENDING_PULL_STATUSES = ['ust_pre_tank'] as const
 
 // ── helpers ────────────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import { getServerSupabase } from '../../../lib/supabase/server'
 // ── constants ──────────────────────────────────────────────────────────────────
 
 const OPEN_STATUSES = ['ast_open', 'ust_open'] as const
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const PENDING_PULL_STATUSES = ['ust_pre_tank'] as const
 
 // ── types ──────────────────────────────────────────────────────────────────────
