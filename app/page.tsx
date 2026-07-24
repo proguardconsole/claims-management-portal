@@ -40,7 +40,16 @@ type KpiData = {
   dirtyPull: number
   totalPulls: number
   dirtyPct: number
-  deductibleReceived: number
+  netFlow: {
+    paidToDate: number
+    fromCarrier: number
+    toContractor: number
+    unspecified: number
+    deductibleReceived: number
+    serviceFeeReceived: number
+    totalReceived: number
+    netFlow: number
+  }
 }
 
 // ─── constants ────────────────────────────────────────────────────────────────
@@ -530,7 +539,7 @@ export default function KpiSummaryPage() {
         <SectionLabel>UST Metrics</SectionLabel>
         <div style={{ display: 'flex', gap: 16 }}>
           {showKpiSkeleton ? (
-            [0, 1, 2].map((i) => <KpiCardSkeleton key={i} />)
+            [0, 1].map((i) => <KpiCardSkeleton key={i} />)
           ) : (
             <>
               <KpiCard
@@ -545,15 +554,72 @@ export default function KpiSummaryPage() {
                 valueColor="var(--accent-red)"
                 sublabel={kpis ? `${kpis.dirtyPct ?? 0}% of all pulls` : undefined}
               />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── Section A3: Net Flow ── */}
+      <div>
+        <SectionLabel>Net Flow — all time</SectionLabel>
+        {/* Row 1 — top level summary */}
+        <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+          {showKpiSkeleton ? (
+            [0, 1, 2].map((i) => <KpiCardSkeleton key={i} />)
+          ) : (
+            <>
               <KpiCard
-                label="Deductible Received"
-                value={kpis?.deductibleReceived != null ? formatCurrency(kpis.deductibleReceived) : '—'}
+                label="Paid to Date"
+                value={kpis?.netFlow ? formatCurrency(kpis.netFlow.paidToDate) : '—'}
+                sublabel="Outgoing excl. adjuster fees"
+              />
+              <KpiCard
+                label="Received to Date"
+                value={kpis?.netFlow ? formatCurrency(kpis.netFlow.totalReceived) : '—'}
                 valueColor="var(--accent-green)"
-                sublabel="Incoming payments to date"
+                sublabel="All incoming payments"
+              />
+              <KpiCard
+                label="Net Flow"
+                value={kpis?.netFlow ? formatCurrency(Math.abs(kpis.netFlow.netFlow)) : '—'}
+                valueColor={kpis?.netFlow && kpis.netFlow.netFlow >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}
+                sublabel={kpis?.netFlow && kpis.netFlow.netFlow >= 0 ? 'Net positive' : 'Net outflow'}
               />
             </>
           )}
         </div>
+        {/* Row 2 — breakdowns */}
+        {kpis && (
+          <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
+            {/* Paid to Date breakdown */}
+            <div style={{ flex: 1, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, padding: '14px 16px' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-tertiary)', marginBottom: 10 }}>Paid to Date breakdown</div>
+              {[
+                { label: 'From Carrier', value: kpis.netFlow?.fromCarrier },
+                { label: 'To Contractor', value: kpis.netFlow?.toContractor },
+                { label: 'Unspecified', value: kpis.netFlow?.unspecified },
+              ].map(({ label, value }) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 6, marginBottom: 6, borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{value != null ? formatCurrency(value) : '—'}</span>
+                </div>
+              ))}
+            </div>
+            {/* Received to Date breakdown */}
+            <div style={{ flex: 1, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, padding: '14px 16px' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-tertiary)', marginBottom: 10 }}>Received to Date breakdown</div>
+              {[
+                { label: 'Deductible Received', value: kpis.netFlow?.deductibleReceived },
+                { label: 'Service Fee Received', value: kpis.netFlow?.serviceFeeReceived },
+              ].map(({ label, value }) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 6, marginBottom: 6, borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--accent-green)' }}>{value != null ? formatCurrency(value) : '—'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Section B: Period-scoped KPIs ── */}

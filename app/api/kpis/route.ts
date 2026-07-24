@@ -50,7 +50,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   // ── Wave 1: four parallel fetches ─────────────────────────────────────────────
 
-  const [openClaimsRes, terminalEventsRes, openedCountRes, bottleneckEventsRes, allEstimatesRes, cleanDirtyRes, deductibleRes] = await Promise.all([
+  const [openClaimsRes, terminalEventsRes, openedCountRes, bottleneckEventsRes, allEstimatesRes, cleanDirtyRes, financialRes] = await Promise.all([
     // All currently open claims — drives open/overdue/avgDaysOpen + pipeline/recent/age/coverage breakdowns
     sb
       .from('claims')
@@ -98,11 +98,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .not('proceed_to_remediation', 'is', null)
       .not('stage', 'in', '("Needs Analysis","Service Fee Billed")'),
 
-    // Deductible Received to Date — sum of all incoming payments
+    // Net Flow — all claim payments with type/direction breakdown
     sb
       .from('claim_payments')
-      .select('amount')
-      .eq('incoming_or_outgoing', 'Incoming'),
+      .select('amount, payment_type, incoming_or_outgoing, account_name')
+      .not('claim_id', 'is', null),
   ])
 
   if (openClaimsRes.error) {
@@ -123,8 +123,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (cleanDirtyRes.error) {
     return NextResponse.json({ error: cleanDirtyRes.error.message }, { status: 500 })
   }
-  if (deductibleRes.error) {
-    return NextResponse.json({ error: deductibleRes.error.message }, { status: 500 })
+  if (financialRes.error) {
+    return NextResponse.json({ error: financialRes.error.message }, { status: 500 })
   }
 
   const openClaims     = openClaimsRes.data ?? []
@@ -355,12 +355,37 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const totalPulls = cleanCount + dirtyCount
   const dirtyPct   = totalPulls > 0 ? Math.round((dirtyCount / totalPulls) * 100) : 0
 
-  // ── Deductible Received to Date ───────────────────────────────────────────────
+  // ── Net Flow ──────────────────────────────────────────────────────────────────
 
-  const deductibleReceived = (deductibleRes.data ?? []).reduce(
-    (s, r) => s + (((r as { amount: number | null }).amount) ?? 0),
-    0,
-  )
+  type PayRow = { amount: number | null; payment_type: string | null; incoming_or_outgoing: string | null; account_name: string | null }
+  const allPayments = (financialRes.data ?? []) as PayRow[]
+
+  const paidToDate = allPayments
+    .filter((p) => p.payment_type === 'Claim Payout' && p.incoming_or_outgoing === 'Outgoing' && p.account_name !== 'Claim Adjusters')
+    .reduce((s, p) => s + (p.amount ?? 0), 0)
+
+  const fromCarrier = allPayments
+    .filter((p) => p.account_name === 'Claim Adjusters - Recoverable from Carrier')
+    .reduce((s, p) => s + (p.amount ?? 0), 0)
+
+  const toContractor = allPayments
+    .filter((p) => p.payment_type === 'Claim Payout' && p.incoming_or_outgoing === 'Outgoing' && p.account_name === null)
+    .reduce((s, p) => s + (p.amount ?? 0), 0)
+
+  const unspecified = allPayments
+    .filter((p) => p.payment_type === 'Claim Payout' && p.incoming_or_outgoing === 'Outgoing' && p.account_name !== null && p.account_name !== 'Claim Adjusters' && p.account_name !== 'Claim Adjusters - Recoverable from Carrier')
+    .reduce((s, p) => s + (p.amount ?? 0), 0)
+
+  const deductibleReceived = allPayments
+    .filter((p) => p.payment_type === 'Deductible' && p.incoming_or_outgoing === 'Incoming')
+    .reduce((s, p) => s + (p.amount ?? 0), 0)
+
+  const serviceFeeReceived = allPayments
+    .filter((p) => p.payment_type === 'Service Fee' && p.incoming_or_outgoing === 'Incoming')
+    .reduce((s, p) => s + (p.amount ?? 0), 0)
+
+  const totalReceived = deductibleReceived + serviceFeeReceived
+  const netFlow       = totalReceived - paidToDate
 
   return NextResponse.json({
     period,
@@ -385,6 +410,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     dirtyPull: dirtyCount,
     totalPulls,
     dirtyPct,
-    deductibleReceived,
+    netFlow: {
+      paidToDate,
+      fromCarrier,
+      toContractor,
+      unspecified,
+      deductibleReceived,
+      serviceFeeReceived,
+      totalReceived,
+      netFlow,
+    },
   })
 }

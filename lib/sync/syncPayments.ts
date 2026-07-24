@@ -9,7 +9,7 @@ const supabase = createClient(
 const ZOHO_MODULE = 'Payments'
 const PAGE_SIZE = 200
 const UPSERT_BATCH_SIZE = 100
-const CLAIM_PAYOUT_TYPE = 'Claim Payout'
+const SYNC_PAYMENT_TYPES = ['Claim Payout', 'Service Fee', 'Deductible']
 
 type ZohoRecord = Record<string, unknown>
 
@@ -49,6 +49,7 @@ function mapRecord(record: ZohoRecord, syncedAt: string) {
     policy_id: nested(record.Policy, 'id'),
     note: str(record.Note),
     account_name: nested(record.Account, 'name'),
+    payment_type: str(record.Payment_Type),
     synced_at: syncedAt,
   }
 }
@@ -75,7 +76,7 @@ export async function syncPayments(): Promise<SyncResult> {
     page++
   }
 
-  const claimPayouts = allRecords.filter((r) => r.Payment_Type === CLAIM_PAYOUT_TYPE)
+  const claimPayouts = allRecords.filter((r) => SYNC_PAYMENT_TYPES.includes(r.Payment_Type as string))
 
   console.log(`\nTotal Payments fetched from Zoho: ${allRecords.length}`)
   console.log(`  Claim Payout records: ${claimPayouts.length}`)
