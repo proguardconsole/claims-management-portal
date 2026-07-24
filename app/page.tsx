@@ -36,6 +36,11 @@ type KpiData = {
   pipeline: { ast: StageRow[]; ust: StageRow[] }
   bottlenecks: Bottleneck[]
   recent: RecentClaim[]
+  cleanPull: number
+  dirtyPull: number
+  totalPulls: number
+  dirtyPct: number
+  deductibleReceived: number
 }
 
 // ─── constants ────────────────────────────────────────────────────────────────
@@ -48,6 +53,10 @@ const PERIODS: { value: Period; label: string; closedLabel: string }[] = [
 ]
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
+
+function formatCurrency(n: number): string {
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+}
 
 function timeAgo(isoStr: string): string {
   const mins = Math.floor((Date.now() - new Date(isoStr).getTime()) / 60_000)
@@ -510,6 +519,37 @@ export default function KpiSummaryPage() {
                 label={periodObj.closedLabel}
                 value={kpis?.closedThisPeriod ?? '—'}
                 valueColor="var(--accent-green)"
+              />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── Section A2: UST Metrics ── */}
+      <div>
+        <SectionLabel>UST Metrics</SectionLabel>
+        <div style={{ display: 'flex', gap: 16 }}>
+          {showKpiSkeleton ? (
+            [0, 1, 2].map((i) => <KpiCardSkeleton key={i} />)
+          ) : (
+            <>
+              <KpiCard
+                label="Clean Pull"
+                value={kpis?.cleanPull ?? '—'}
+                valueColor="var(--accent-green)"
+                sublabel={kpis ? `${100 - (kpis.dirtyPct ?? 0)}% of all pulls` : undefined}
+              />
+              <KpiCard
+                label="Dirty Pull"
+                value={kpis?.dirtyPull ?? '—'}
+                valueColor="var(--accent-red)"
+                sublabel={kpis ? `${kpis.dirtyPct ?? 0}% of all pulls` : undefined}
+              />
+              <KpiCard
+                label="Deductible Received"
+                value={kpis?.deductibleReceived != null ? formatCurrency(kpis.deductibleReceived) : '—'}
+                valueColor="var(--accent-green)"
+                sublabel="Incoming payments to date"
               />
             </>
           )}

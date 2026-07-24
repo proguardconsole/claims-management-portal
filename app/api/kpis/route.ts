@@ -50,7 +50,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   // ── Wave 1: four parallel fetches ─────────────────────────────────────────────
 
-  const [openClaimsRes, terminalEventsRes, openedCountRes, bottleneckEventsRes, allEstimatesRes] = await Promise.all([
+  const [openClaimsRes, terminalEventsRes, openedCountRes, bottleneckEventsRes, allEstimatesRes, cleanDirtyRes, deductibleRes] = await Promise.all([
     // All currently open claims — drives open/overdue/avgDaysOpen + pipeline/recent/age/coverage breakdowns
     sb
       .from('claims')
@@ -89,6 +89,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .from('estimates')
       .select('claim_id, estimate_total')
       .not('claim_id', 'is', null),
+
+    // Clean vs Dirty Pull — all UST history where a pull decision was made
+    sb
+      .from('claims')
+      .select('proceed_to_remediation')
+      .eq('tank_type', 'UST')
+      .not('proceed_to_remediation', 'is', null)
+      .not('stage', 'in', '("Needs Analysis","Service Fee Billed")'),
+
+    // Deductible Received to Date — sum of all incoming payments
+    sb
+      .from('claim_payments')
+      .select('amount')
+      .eq('incoming_or_outgoing', 'Incoming'),
   ])
 
   if (openClaimsRes.error) {
@@ -105,6 +119,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
   if (allEstimatesRes.error) {
     return NextResponse.json({ error: allEstimatesRes.error.message }, { status: 500 })
+  }
+  if (cleanDirtyRes.error) {
+    return NextResponse.json({ error: cleanDirtyRes.error.message }, { status: 500 })
+  }
+  if (deductibleRes.error) {
+    return NextResponse.json({ error: deductibleRes.error.message }, { status: 500 })
   }
 
   const openClaims     = openClaimsRes.data ?? []
@@ -328,6 +348,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .sort((a, b) => b.avgDays - a.avgDays)
     .slice(0, 5)
 
+  // ── Clean vs Dirty Pull ───────────────────────────────────────────────────────
+
+  const cleanCount = (cleanDirtyRes.data ?? []).filter((r) => (r as { proceed_to_remediation: string | null }).proceed_to_remediation === 'No').length
+  const dirtyCount = (cleanDirtyRes.data ?? []).filter((r) => (r as { proceed_to_remediation: string | null }).proceed_to_remediation === 'Yes').length
+  const totalPulls = cleanCount + dirtyCount
+  const dirtyPct   = totalPulls > 0 ? Math.round((dirtyCount / totalPulls) * 100) : 0
+
+  // ── Deductible Received to Date ───────────────────────────────────────────────
+
+  const deductibleReceived = (deductibleRes.data ?? []).reduce(
+    (s, r) => s + (((r as { amount: number | null }).amount) ?? 0),
+    0,
+  )
+
   return NextResponse.json({
     period,
     since,
@@ -347,5 +381,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     pipeline,
     bottlenecks,
     recent,
+    cleanPull: cleanCount,
+    dirtyPull: dirtyCount,
+    totalPulls,
+    dirtyPct,
+    deductibleReceived,
   })
 }
