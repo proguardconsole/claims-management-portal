@@ -285,9 +285,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const astClaims = openClaims.filter((c) => c.claim_status === 'ast_open')
   const ustClaims = openClaims.filter(
-    (c) =>
-      ['ust_open', 'ust_pre_tank'].includes((c.claim_status as string | null) ?? '') &&
-      c.tank_type === 'UST',
+    (c) => c.claim_status === 'ust_open' && c.tank_type === 'UST',
   )
   const pipeline = {
     ast: toStageRows(astClaims),
