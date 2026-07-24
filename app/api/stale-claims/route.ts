@@ -138,3 +138,40 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   return NextResponse.json({ success: true, id: (data as { id: string }).id })
 }
+
+// ── PATCH — update the most recent note on a stale claim ──────────────────────
+
+export async function PATCH(req: NextRequest): Promise<NextResponse> {
+  if (!authOk(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let body: { claim_id: string; note: string; noted_by?: string }
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
+
+  const { claim_id, note, noted_by } = body
+
+  if (!claim_id || typeof claim_id !== 'string') {
+    return NextResponse.json({ error: 'claim_id is required' }, { status: 400 })
+  }
+  if (!note || typeof note !== 'string' || !note.trim()) {
+    return NextResponse.json({ error: 'note is required' }, { status: 400 })
+  }
+
+  const sb = getServerSupabase()
+
+  const { error } = await sb
+    .from('stale_notes')
+    .update({ note: note.trim(), noted_by: noted_by?.trim() || 'Team' })
+    .eq('claim_id', claim_id)
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ success: true })
+}

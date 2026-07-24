@@ -7,7 +7,6 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  LabelList,
   ResponsiveContainer,
   CartesianGrid,
   LineChart,
@@ -25,12 +24,6 @@ type BottleneckRow = {
   pipeline: string
   claim_count: number
   avg_days_in_stage: number
-}
-
-type StaleRow = {
-  pipeline: string
-  bucket: string
-  count: number
 }
 
 type Tab = 'operations' | 'leadership'
@@ -158,14 +151,6 @@ type FunnelPanelClaim = {
 
 // ─── constants ─────────────────────────────────────────────────────────────────
 
-const BUCKET_COLORS: Record<string, string> = {
-  '14-21d': '#E8C84A',
-  '21-30d': '#E8A53A',
-  '30-60d': '#E87A3A',
-  '60d+':   '#E84A4A',
-}
-const BUCKETS = ['14-21d', '21-30d', '30-60d', '60d+'] as const
-
 const DENIAL_COLORS = [
   '#E84A4A', '#E87A3A', '#E8A53A', '#E8C84A',
   '#4CAF82', '#2a78d6', '#9b59b6',
@@ -200,22 +185,6 @@ function buildFunnelData(rows: BottleneckRow[]): FunnelDatum[] {
   }
   for (const d of Object.values(map)) d.totalCount = d.astCount + d.ustCount
   return Object.values(map).sort((a, b) => b.totalCount - a.totalCount)
-}
-
-type ChartDatum = { pipeline: string; [bucket: string]: number | string }
-
-function buildChartData(rows: StaleRow[]): ChartDatum[] {
-  const lookup: Record<string, number> = {}
-  for (const r of rows) {
-    lookup[`${r.pipeline}||${r.bucket}`] = r.count
-  }
-  return ['AST', 'UST'].map((pipeline) => {
-    const datum: ChartDatum = { pipeline }
-    for (const b of BUCKETS) {
-      datum[b] = lookup[`${pipeline}||${b}`] ?? 0
-    }
-    return datum
-  })
 }
 
 function buildVolumeChartData(volume: VolumeData): WeekDatum[] {
@@ -783,169 +752,6 @@ function BottleneckFunnel({ rows }: { rows: BottleneckRow[] }) {
   )
 }
 
-// ─── stale triage chart ────────────────────────────────────────────────────────
-
-function CustomTooltip({
-  active,
-  payload,
-  label,
-}: {
-  active?: boolean
-  payload?: Array<{ name: string; value: number; color: string }>
-  label?: string
-}) {
-  if (!active || !payload?.length) return null
-  return (
-    <div
-      style={{
-        background: 'var(--bg-header)',
-        border: '1px solid var(--border)',
-        borderRadius: 4,
-        padding: '10px 14px',
-        fontSize: 12,
-      }}
-    >
-      <div
-        style={{
-          fontWeight: 600,
-          color: 'var(--text-primary)',
-          marginBottom: 6,
-        }}
-      >
-        {label}
-      </div>
-      {payload.map((entry) => (
-        <div
-          key={entry.name}
-          style={{
-            display: 'flex',
-            gap: 8,
-            alignItems: 'center',
-            marginBottom: 3,
-          }}
-        >
-          <div
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: 2,
-              background: entry.color,
-              flexShrink: 0,
-            }}
-          />
-          <span style={{ color: 'var(--text-secondary)' }}>{entry.name}</span>
-          <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
-            {entry.value}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function StaleTriageChart({ rows }: { rows: StaleRow[] }) {
-  const chartData = buildChartData(rows)
-
-  return (
-    <div
-      style={{
-        background: 'var(--bg-surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 6,
-        padding: '20px 24px',
-      }}
-    >
-      {/* Header */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
-          Stale claim triage
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
-          Open claims past 14 days, by pipeline and age bucket
-        </div>
-      </div>
-
-      {/* Chart */}
-      <ResponsiveContainer width="100%" height={280}>
-        <BarChart
-          data={chartData}
-          margin={{ top: 20, right: 16, left: 0, bottom: 4 }}
-          barGap={4}
-          barCategoryGap={40}
-        >
-          <CartesianGrid
-            vertical={false}
-            stroke="var(--border)"
-            strokeDasharray="3 3"
-          />
-          <XAxis
-            dataKey="pipeline"
-            axisLine={false}
-            tickLine={false}
-            tick={{ fill: 'var(--text-secondary)', fontSize: 12 }}
-          />
-          <YAxis
-            axisLine={false}
-            tickLine={false}
-            tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }}
-            allowDecimals={false}
-          />
-          <Tooltip
-            content={<CustomTooltip />}
-            cursor={{ fill: 'rgba(255,255,255,0.03)' }}
-          />
-          {BUCKETS.map((bucket) => (
-            <Bar
-              key={bucket}
-              dataKey={bucket}
-              name={bucket}
-              fill={BUCKET_COLORS[bucket]}
-              radius={[3, 3, 0, 0]}
-              barSize={28}
-            >
-              <LabelList
-                dataKey={bucket}
-                position="top"
-                style={{ fontSize: 11, fill: 'var(--text-secondary)', fontWeight: 500 }}
-                formatter={(val: unknown) => (Number(val) > 0 ? String(val) : '')}
-              />
-            </Bar>
-          ))}
-        </BarChart>
-      </ResponsiveContainer>
-
-      {/* Legend */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 20,
-          marginTop: 12,
-          justifyContent: 'center',
-          flexWrap: 'wrap',
-        }}
-      >
-        {BUCKETS.map((bucket) => (
-          <div
-            key={bucket}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <div
-              style={{
-                width: 12,
-                height: 12,
-                borderRadius: 3,
-                background: BUCKET_COLORS[bucket],
-                flexShrink: 0,
-              }}
-            />
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{bucket}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 // ─── stale checklist ───────────────────────────────────────────────────────────
 
 function StaleChecklist({
@@ -960,6 +766,8 @@ function StaleChecklist({
   const [noteExpanded, setNoteExpanded] = useState<Record<string, boolean>>({})
   const [noteSaving, setNoteSaving] = useState<Record<string, boolean>>({})
   const [localNoted, setLocalNoted] = useState<Record<string, string>>({})
+  const [editMode, setEditMode] = useState<Record<string, boolean>>({})
+  const [editInputs, setEditInputs] = useState<Record<string, string>>({})
 
   const remaining = claims.filter((c) => !c.has_note && !localNoted[c.id]).length
   const visibleClaims = showAll ? claims : claims.filter((c) => !c.has_note && !localNoted[c.id])
@@ -983,6 +791,29 @@ function StaleChecklist({
         setLocalNoted((n) => ({ ...n, [claim.id]: note }))
         setNoteExpanded((e) => ({ ...e, [claim.id]: false }))
         setNoteInputs((i) => ({ ...i, [claim.id]: '' }))
+      }
+    } catch {}
+    setNoteSaving((s) => ({ ...s, [claim.id]: false }))
+  }
+
+  const handleEdit = async (claim: StaleClaim) => {
+    const note = (editInputs[claim.id] ?? '').trim()
+    if (!note) return
+    setNoteSaving((s) => ({ ...s, [claim.id]: true }))
+    try {
+      const res = await fetch('/api/internal/stale-claims', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          claim_id: claim.id,
+          note,
+          noted_by: 'Team',
+        }),
+      })
+      if (res.ok) {
+        setLocalNoted((n) => ({ ...n, [claim.id]: note }))
+        setEditMode((e) => ({ ...e, [claim.id]: false }))
+        setEditInputs((i) => ({ ...i, [claim.id]: '' }))
       }
     } catch {}
     setNoteSaving((s) => ({ ...s, [claim.id]: false }))
@@ -1187,16 +1018,92 @@ function StaleChecklist({
                 </div>
 
                 {isNoted && noteText && (
-                  <div
-                    style={{
-                      paddingBottom: 8,
-                      fontSize: 12,
-                      color: 'var(--text-tertiary)',
-                      fontStyle: 'italic',
-                    }}
-                  >
-                    &ldquo;{noteText}&rdquo;
-                  </div>
+                  editMode[claim.id] ? (
+                    <div style={{ paddingBottom: 10, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                      <textarea
+                        value={editInputs[claim.id] ?? ''}
+                        onChange={(e) => setEditInputs((i) => ({ ...i, [claim.id]: e.target.value }))}
+                        rows={2}
+                        style={{
+                          flex: 1,
+                          fontSize: 12,
+                          padding: '7px 10px',
+                          background: 'var(--bg-elevated)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 4,
+                          color: 'var(--text-primary)',
+                          resize: 'vertical',
+                          fontFamily: 'inherit',
+                        }}
+                      />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+                        <button
+                          onClick={() => handleEdit(claim)}
+                          disabled={saving || !(editInputs[claim.id] ?? '').trim()}
+                          style={{
+                            padding: '7px 14px',
+                            fontSize: 12,
+                            fontWeight: 500,
+                            background: '#4CAF82',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: 4,
+                            cursor: saving ? 'default' : 'pointer',
+                            opacity: saving || !(editInputs[claim.id] ?? '').trim() ? 0.6 : 1,
+                          }}
+                        >
+                          {saving ? 'Saving…' : 'Save'}
+                        </button>
+                        <button
+                          onClick={() => setEditMode((e) => ({ ...e, [claim.id]: false }))}
+                          style={{
+                            padding: '7px 14px',
+                            fontSize: 12,
+                            fontWeight: 500,
+                            background: 'transparent',
+                            color: 'var(--text-secondary)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ paddingBottom: 8, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <div
+                        style={{
+                          flex: 1,
+                          fontSize: 12,
+                          color: 'var(--text-tertiary)',
+                          fontStyle: 'italic',
+                        }}
+                      >
+                        &ldquo;{noteText}&rdquo;
+                      </div>
+                      <button
+                        onClick={() => {
+                          setEditMode((e) => ({ ...e, [claim.id]: true }))
+                          setEditInputs((i) => ({ ...i, [claim.id]: noteText ?? '' }))
+                        }}
+                        style={{
+                          padding: '2px 8px',
+                          fontSize: 11,
+                          fontWeight: 500,
+                          background: 'transparent',
+                          color: 'var(--text-secondary)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                        }}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  )
                 )}
 
                 {!isNoted && expanded && (
@@ -2527,7 +2434,6 @@ export default function AnalyticsPage() {
 
   // ── Operations state ──────────────────────────────────────────────────────────
   const [bottleneck, setBottleneck] = useState<BottleneckRow[]>([])
-  const [stale, setStale] = useState<StaleRow[]>([])
   const [agentRows, setAgentRows] = useState<AgentRow[]>([])
   const [staleChecklist, setStaleChecklist] = useState<StaleClaim[]>([])
   const [opsLoading, setOpsLoading] = useState(true)
@@ -2551,19 +2457,14 @@ export default function AnalyticsPage() {
     setOpsLoading(true)
     setOpsError(null)
     try {
-      const [bRes, sRes, aRes, scRes] = await Promise.all([
+      const [bRes, aRes, scRes] = await Promise.all([
         fetch('/api/internal/analytics?view=bottleneck'),
-        fetch('/api/internal/analytics?view=stale'),
         fetch('/api/internal/analytics?view=agents'),
         fetch('/api/internal/stale-claims'),
       ])
       if (!bRes.ok) {
         const body = await bRes.json().catch(() => ({}))
         throw new Error(body.error ?? `Bottleneck request failed (${bRes.status})`)
-      }
-      if (!sRes.ok) {
-        const body = await sRes.json().catch(() => ({}))
-        throw new Error(body.error ?? `Stale request failed (${sRes.status})`)
       }
       if (!aRes.ok) {
         const body = await aRes.json().catch(() => ({}))
@@ -2573,11 +2474,10 @@ export default function AnalyticsPage() {
         const body = await scRes.json().catch(() => ({}))
         throw new Error(body.error ?? `Stale claims request failed (${scRes.status})`)
       }
-      const [bData, sData, aData, scData] = await Promise.all([
-        bRes.json(), sRes.json(), aRes.json(), scRes.json(),
+      const [bData, aData, scData] = await Promise.all([
+        bRes.json(), aRes.json(), scRes.json(),
       ])
       setBottleneck(bData.data ?? [])
-      setStale(sData.data ?? [])
       setAgentRows(aData.data ?? [])
       setStaleChecklist(scData.claims ?? [])
     } catch (err) {
@@ -2728,7 +2628,6 @@ export default function AnalyticsPage() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             <BottleneckFunnel rows={bottleneck} />
-            <StaleTriageChart rows={stale} />
             <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 24 }}>
               <StaleChecklist claims={staleChecklist} loading={false} />
               <div style={{ minWidth: 0, overflow: 'hidden' }}>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GET as staleGET, POST as stalePOST } from '../../stale-claims/route'
+import { GET as staleGET, POST as stalePOST, PATCH as stalePATCH } from '../../stale-claims/route'
 
 const bearer = () => process.env.CRON_SECRET ?? ''
 
@@ -23,4 +23,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     body: rawBody,
   })
   return stalePOST(proxyReq)
+}
+
+export async function PATCH(req: NextRequest): Promise<NextResponse> {
+  const rawBody = await req.text()
+  const proxyUrl = new URL('/api/stale-claims', req.nextUrl.origin)
+  const proxyReq = new NextRequest(proxyUrl, {
+    method: 'PATCH',
+    headers: {
+      Authorization:  `Bearer ${bearer()}`,
+      'Content-Type': 'application/json',
+    },
+    body: rawBody,
+  })
+  return stalePATCH(proxyReq)
 }
