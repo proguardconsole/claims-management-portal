@@ -88,7 +88,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const claims = data ?? []
   const ids = claims.map((c) => c.id)
 
-  const [{ data: estRows }, { data: payRows }] = await Promise.all([
+  const [{ data: estRows }, { data: payRows }, { data: eventRows }] = await Promise.all([
     ids.length > 0
       ? sb
           .from('estimates')
@@ -104,6 +104,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ids.length > 0
       ? sb.from('claim_payments').select('claim_id, amount, incoming_or_outgoing, account_name').in('claim_id', ids)
       : Promise.resolve({ data: [] as { claim_id: string; amount: number | null; incoming_or_outgoing: string | null; account_name: string | null }[] }),
+    stage && ids.length > 0
+      ? sb
+          .from('claim_events')
+          .select('claim_id, entered_at')
+          .in('claim_id', ids)
+          .eq('stage', stage)
+          .order('entered_at', { ascending: false })
+      : Promise.resolve({ data: [] as { claim_id: string | null; entered_at: string | null }[] }),
   ])
 
   const estimateMap: Record<string, number> = {}
@@ -132,6 +140,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  const enteredAtMap: Record<string, string> = {}
+  for (const e of eventRows ?? []) {
+    const cid = e.claim_id as string | null
+    if (cid && !enteredAtMap[cid] && e.entered_at) {
+      enteredAtMap[cid] = e.entered_at as string
+    }
+  }
+
   const enriched = claims.map((c) => ({
     ...c,
     estimate_total:   estimateMap[c.id] ?? 0,
@@ -139,6 +155,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     from_carrier:     carrierMap[c.id] ?? 0,
     received_to_date: receivedMap[c.id] ?? 0,
     contractor_name:  contractorMap[c.id] ?? null,
+    stage_entered_at: enteredAtMap[c.id] ?? null,
   }))
 
   return NextResponse.json({ claims: enriched, total: enriched.length })

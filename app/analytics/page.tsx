@@ -147,6 +147,7 @@ type FunnelPanelClaim = {
   claim_status: string | null
   owner_name: string | null
   modified_time: string | null
+  stage_entered_at: string | null
 }
 
 // ─── constants ─────────────────────────────────────────────────────────────────
@@ -674,9 +675,10 @@ function BottleneckFunnel({ rows }: { rows: BottleneckRow[] }) {
                 </thead>
                 <tbody>
                   {panelClaims.map((c) => {
-                    const days = c.modified_time
+                    const stageDate = c.stage_entered_at ?? c.modified_time
+                    const days = stageDate
                       ? Math.round(
-                          (now - new Date(c.modified_time).getTime()) / (1000 * 60 * 60 * 24),
+                          (now - new Date(stageDate).getTime()) / (1000 * 60 * 60 * 24),
                         )
                       : null
                     const pipeline = c.claim_status?.startsWith('ast')
