@@ -304,26 +304,23 @@ function ClaimRow({
 function FilterBar({
   pipeline,
   setPipeline,
-  ustView,
-  setUstView,
   search,
   setSearch,
   counts,
   lastUpdatedLabel,
 }: {
-  pipeline: 'all' | 'AST' | 'UST'
-  setPipeline: (p: 'all' | 'AST' | 'UST') => void
-  ustView: 'open' | 'pending'
-  setUstView: (v: 'open' | 'pending') => void
+  pipeline: 'all' | 'AST' | 'UST' | 'pending'
+  setPipeline: (p: 'all' | 'AST' | 'UST' | 'pending') => void
   search: string
   setSearch: (s: string) => void
-  counts: { all: number; ast: number; ust: number; ustOpen: number; pendingPull: number }
+  counts: { all: number; ast: number; ust: number; pendingPull: number }
   lastUpdatedLabel?: string
 }) {
-  const tabs: { key: 'all' | 'AST' | 'UST'; label: string; count: number }[] = [
-    { key: 'all', label: 'All', count: counts.all },
-    { key: 'AST', label: 'AST', count: counts.ast },
-    { key: 'UST', label: 'UST', count: counts.ust },
+  const tabs: { key: 'all' | 'AST' | 'UST' | 'pending'; label: string; count: number }[] = [
+    { key: 'all',     label: 'All',          count: counts.all },
+    { key: 'AST',     label: 'AST',          count: counts.ast },
+    { key: 'UST',     label: 'UST',          count: counts.ust },
+    { key: 'pending', label: 'Pending Pull',  count: counts.pendingPull },
   ]
 
   return (
@@ -370,37 +367,6 @@ function FilterBar({
           </span>
         )}
       </div>
-      {pipeline === 'UST' && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-          {(
-            [
-              { key: 'open' as const, label: 'Open Claims', count: counts.ustOpen },
-              { key: 'pending' as const, label: 'Pending Pull', count: counts.pendingPull },
-            ] as { key: 'open' | 'pending'; label: string; count: number }[]
-          ).map(({ key, label, count }) => {
-            const active = ustView === key
-            return (
-              <button
-                key={key}
-                onClick={() => setUstView(key)}
-                style={{
-                  padding: '4px 10px',
-                  fontSize: 11,
-                  fontWeight: active ? 700 : 500,
-                  cursor: 'pointer',
-                  background: active ? 'var(--bg-elevated)' : 'var(--bg-surface)',
-                  color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
-                  border: `1px solid ${active ? 'var(--border-bright)' : 'var(--border)'}`,
-                  borderLeft: active ? '3px solid var(--accent-yellow)' : '3px solid transparent',
-                  borderRadius: 4,
-                }}
-              >
-                {label} · {count}
-              </button>
-            )
-          })}
-        </div>
-      )}
       <input
         type="text"
         value={search}
@@ -1176,8 +1142,7 @@ export default function ClaimsPage() {
   const claimParam = searchParams.get('claim')
   const [allClaims, setAllClaims] = useState<Claim[]>([])
   const [loadingList, setLoadingList] = useState(true)
-  const [pipeline, setPipeline] = useState<'all' | 'AST' | 'UST'>('all')
-  const [ustView, setUstView] = useState<'open' | 'pending'>('open')
+  const [pipeline, setPipeline] = useState<'all' | 'AST' | 'UST' | 'pending'>('all')
   const [search, setSearch] = useState('')
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null)
 
@@ -1284,13 +1249,12 @@ export default function ClaimsPage() {
   }, [selectedClaim?.id])
 
   // Client-side filter + sort
-  const PENDING_STAGES = ['Service Fee Billed', 'Attendance Deployed', 'Needs Analysis']
   const filtered = allClaims.filter((c) => {
     const matchesPipeline =
-      pipeline === 'all' ||
-      (pipeline === 'AST' && c.tank_type === 'AST') ||
-      (pipeline === 'UST' && c.tank_type === 'UST' && ustView === 'open' && c.claim_status === 'ust_open') ||
-      (pipeline === 'UST' && c.tank_type === 'UST' && ustView === 'pending' && PENDING_STAGES.includes(c.stage ?? ''))
+      (pipeline === 'all'     && (c.claim_status === 'ast_open' || c.claim_status === 'ust_open')) ||
+      (pipeline === 'AST'     && c.claim_status === 'ast_open') ||
+      (pipeline === 'UST'     && c.claim_status === 'ust_open') ||
+      (pipeline === 'pending' && c.claim_status === 'ust_pre_tank')
     const s = search.toLowerCase()
     const matchesSearch =
       !search ||
@@ -1331,11 +1295,10 @@ export default function ClaimsPage() {
   })
 
   const counts = {
-    all:         allClaims.length,
-    ast:         allClaims.filter((c) => c.tank_type === 'AST').length,
-    ust:         allClaims.filter((c) => c.tank_type === 'UST').length,
-    ustOpen:     allClaims.filter((c) => c.tank_type === 'UST' && c.claim_status === 'ust_open').length,
-    pendingPull: allClaims.filter((c) => c.tank_type === 'UST' && PENDING_STAGES.includes(c.stage ?? '')).length,
+    all:         allClaims.filter((c) => c.claim_status === 'ast_open' || c.claim_status === 'ust_open').length,
+    ast:         allClaims.filter((c) => c.claim_status === 'ast_open').length,
+    ust:         allClaims.filter((c) => c.claim_status === 'ust_open').length,
+    pendingPull: allClaims.filter((c) => c.claim_status === 'ust_pre_tank').length,
   }
 
   return (
@@ -1362,8 +1325,6 @@ export default function ClaimsPage() {
         <FilterBar
           pipeline={pipeline}
           setPipeline={setPipeline}
-          ustView={ustView}
-          setUstView={setUstView}
           search={search}
           setSearch={setSearch}
           counts={counts}
