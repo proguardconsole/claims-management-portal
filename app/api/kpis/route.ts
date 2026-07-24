@@ -98,11 +98,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .not('proceed_to_remediation', 'is', null)
       .not('stage', 'in', '("Needs Analysis","Service Fee Billed")'),
 
-    // Net Flow — all claim payments with type/direction breakdown
+    // Net Flow — claim payments within the selected period
     sb
       .from('claim_payments')
       .select('amount, payment_type, incoming_or_outgoing, account_name')
-      .not('claim_id', 'is', null),
+      .not('claim_id', 'is', null)
+      .gte('payment_date', since),
   ])
 
   if (openClaimsRes.error) {

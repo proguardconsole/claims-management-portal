@@ -561,7 +561,7 @@ export default function KpiSummaryPage() {
 
       {/* ── Section A3: Net Flow ── */}
       <div>
-        <SectionLabel>Net Flow — all time</SectionLabel>
+        <SectionLabel>Net Flow — {periodObj.label}</SectionLabel>
         {/* Row 1 — top level summary */}
         <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
           {showKpiSkeleton ? (
