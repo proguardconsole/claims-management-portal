@@ -90,13 +90,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .select('claim_id, estimate_total')
       .not('claim_id', 'is', null),
 
-    // Clean vs Dirty Pull — all UST history where a pull decision was made
+    // Clean vs Dirty Pull — UST pull decisions within the selected period
     sb
       .from('claims')
       .select('proceed_to_remediation')
       .eq('tank_type', 'UST')
       .not('proceed_to_remediation', 'is', null)
-      .not('stage', 'in', '("Needs Analysis","Service Fee Billed")'),
+      .not('stage', 'in', '("Needs Analysis","Service Fee Billed")')
+      .gte('created_time', since),
 
     // Net Flow — claim payments within the selected period
     sb

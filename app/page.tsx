@@ -536,7 +536,7 @@ export default function KpiSummaryPage() {
 
       {/* ── Section A2: UST Metrics ── */}
       <div>
-        <SectionLabel>UST Metrics</SectionLabel>
+        <SectionLabel>UST Metrics — {periodObj.label}</SectionLabel>
         <div style={{ display: 'flex', gap: 16 }}>
           {showKpiSkeleton ? (
             [0, 1].map((i) => <KpiCardSkeleton key={i} />)
