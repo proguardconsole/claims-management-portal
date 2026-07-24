@@ -83,11 +83,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const yearStart = new Date(Date.UTC(new Date().getUTCFullYear(), 0, 1))
 
-    // ── 11 parallel queries ───────────────────────────────────────────────────
+    // ── Pre-fetch: claims opened this period (IDs needed to scope estimates) ──
+
+    const openedThisPeriodRes = await sb
+      .from('claims')
+      .select('id, tank_type')
+      .eq('record_type', 'Claim')
+      .not('owner_name', 'ilike', '%admin%')
+      .gte('created_time', start.toISOString())
+    if (openedThisPeriodRes.error) throw new Error(`openedThisPeriod: ${openedThisPeriodRes.error.message}`)
+    const periodClaimIds = (openedThisPeriodRes.data ?? []).map((c) => c.id).filter(Boolean) as string[]
+
+    // ── 10 parallel queries ───────────────────────────────────────────────────
 
     const [
       openClaimsRes,
-      openedThisPeriodRes,
       openedPrevPeriodRes,
       allClaimsPipelineRes,
       closedEventsRes,
@@ -107,15 +117,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .not('modified_time', 'is', null)
         .not('owner_name', 'ilike', '%admin%'),
 
-      // 2. Opened this period
-      sb
-        .from('claims')
-        .select('tank_type')
-        .eq('record_type', 'Claim')
-        .not('owner_name', 'ilike', '%admin%')
-        .gte('created_time', start.toISOString()),
-
-      // 3. Opened previous period
+      // 2. Opened previous period
       sb
         .from('claims')
         .select('tank_type')
@@ -144,17 +146,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .select('claim_id, stage, entered_at')
         .not('entered_at', 'is', null),
 
-      // 7. Estimates
-      sb
-        .from('estimates')
-        .select('claim_id, estimate_total, contractor_costs, state_fees, adjuster_fees')
-        .not('claim_id', 'is', null),
+      // 6. Estimates — scoped to claims opened this period
+      periodClaimIds.length > 0
+        ? sb
+            .from('estimates')
+            .select('claim_id, estimate_total, contractor_costs, state_fees, adjuster_fees')
+            .in('claim_id', periodClaimIds)
+        : Promise.resolve({ data: [] as { claim_id: string | null; estimate_total: number | null; contractor_costs: number | null; state_fees: number | null; adjuster_fees: number | null }[], error: null }),
 
-      // 8. Payments
+      // 7. Payments — scoped to the selected period
       sb
         .from('claim_payments')
         .select('claim_id, amount, incoming_or_outgoing, account_name')
-        .not('claim_id', 'is', null),
+        .not('claim_id', 'is', null)
+        .gte('payment_date', start.toISOString()),
 
       // 9. YTD closed claims — denial rate + denied this period
       sb
@@ -184,7 +189,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     // Error checks
     if (openClaimsRes.error)        throw new Error(`openClaims: ${openClaimsRes.error.message}`)
-    if (openedThisPeriodRes.error)  throw new Error(`openedThisPeriod: ${openedThisPeriodRes.error.message}`)
     if (openedPrevPeriodRes.error)  throw new Error(`openedPrevPeriod: ${openedPrevPeriodRes.error.message}`)
     if (allClaimsPipelineRes.error) throw new Error(`allClaimsPipeline: ${allClaimsPipelineRes.error.message}`)
     if (closedEventsRes.error)      throw new Error(`closedEvents: ${closedEventsRes.error.message}`)

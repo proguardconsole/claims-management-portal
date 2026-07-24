@@ -383,7 +383,7 @@ function DigestSkeleton() {
 
 // ─── section 3: executive snapshot ────────────────────────────────────────────
 
-function SnapshotSection({ data, periodLabel }: { data: DigestPayload; periodLabel: string }) {
+function SnapshotSection({ data, periodLabel, periodPhrase }: { data: DigestPayload; periodLabel: string; periodPhrase: string }) {
   const { snapshot, pop, financial } = data
   const pl = periodLabel.toLowerCase()
 
@@ -401,7 +401,7 @@ function SnapshotSection({ data, periodLabel }: { data: DigestPayload; periodLab
       delta: <DeltaBadge delta={pop.open_total_delta} positiveIsBad={true} />,
     },
     {
-      label: `Opened this ${pl}`,
+      label: `Opened ${periodPhrase}`,
       value: String(snapshot.opened_this_period),
       delta: <DeltaBadge delta={pop.opened_delta} positiveIsBad={true} />,
     },
@@ -574,9 +574,9 @@ function PipelineCard({
   )
 }
 
-function PipelineHealthSection({ data, periodLabel }: { data: DigestPayload; periodLabel: string }) {
+function PipelineHealthSection({ data, periodLabel, periodPhrase }: { data: DigestPayload; periodLabel: string; periodPhrase: string }) {
   return (
-    <SectionCard title={`Pipeline health — this ${periodLabel.toLowerCase()}`}>
+    <SectionCard title={`Pipeline health — ${periodPhrase}`}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <PipelineCard name="AST" p={data.pipelines.ast} />
         <PipelineCard name="UST" p={data.pipelines.ust} />
@@ -893,11 +893,11 @@ function AgentWorkloadSection({ agents }: { agents: AgentRow[] }) {
 
 // ─── section 8: financial ─────────────────────────────────────────────────────
 
-function FinancialSection({ financial }: { financial: DigestPayload['financial'] }) {
+function FinancialSection({ financial, periodPhrase }: { financial: DigestPayload['financial']; periodPhrase: string }) {
   const rateColor = collectionRateColor(financial.collection_rate_pct)
 
   return (
-    <SectionCard title="Financial overview" className="page-break-before">
+    <SectionCard title={`Financial overview — ${periodPhrase}`} className="page-break-before">
       {/* headline stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 20 }}>
         {[
@@ -996,7 +996,7 @@ function FinancialSection({ financial }: { financial: DigestPayload['financial']
 
 // ─── section 9: denials ────────────────────────────────────────────────────────
 
-function DenialsSection({ denials, periodLabel }: { denials: DigestPayload['denials']; periodLabel: string }) {
+function DenialsSection({ denials, periodLabel, periodPhrase }: { denials: DigestPayload['denials']; periodLabel: string; periodPhrase: string }) {
   const { denied_this_period, ytd_denial_rate_pct, reasons } = denials
   const noDenied = denied_this_period === 0
 
@@ -1006,7 +1006,7 @@ function DenialsSection({ denials, periodLabel }: { denials: DigestPayload['deni
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
         <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 4 }}>
-            Denied this {periodLabel.toLowerCase()}
+            Denied {periodPhrase}
           </div>
           <div style={{ fontSize: 22, fontWeight: 700, color: noDenied ? '#4CAF82' : '#E84A4A' }}>
             {denied_this_period}
@@ -1047,7 +1047,7 @@ function DenialsSection({ denials, periodLabel }: { denials: DigestPayload['deni
             marginBottom: reasons.length > 0 ? 16 : 0,
           }}
         >
-          ✓ No claims denied this {periodLabel.toLowerCase()}
+          ✓ No claims denied {periodPhrase}
         </div>
       )}
 
@@ -1406,6 +1406,14 @@ export default function DigestPage() {
   const periodDate = formatPeriodDate(digest.meta.period, digest.meta.period_start)
   const generatedAt = formatGeneratedAt(digest.meta.generated_at)
 
+  const periodNoun: Record<string, string> = {
+    week: 'this week',
+    month: 'this month',
+    quarter: 'this quarter',
+    year: 'this year',
+  }
+  const periodPhrase = periodNoun[digest.meta.period] ?? 'this week'
+
   return (
     <>
       <style>{`
@@ -1581,10 +1589,10 @@ export default function DigestPage() {
           />
 
           {/* ── SECTION 3: executive snapshot ───────────────────────────── */}
-          <SnapshotSection data={digest} periodLabel={periodLabel} />
+          <SnapshotSection data={digest} periodLabel={periodLabel} periodPhrase={periodPhrase} />
 
           {/* ── SECTION 4: pipeline health ──────────────────────────────── */}
-          <PipelineHealthSection data={digest} periodLabel={periodLabel} />
+          <PipelineHealthSection data={digest} periodLabel={periodLabel} periodPhrase={periodPhrase} />
 
           {/* ── SECTION 5: bottlenecks ──────────────────────────────────── */}
           <BottlenecksSection bottlenecks={digest.bottlenecks} />
@@ -1596,10 +1604,10 @@ export default function DigestPage() {
           <AgentWorkloadSection agents={digest.agents} />
 
           {/* ── SECTION 8: financial ────────────────────────────────────── */}
-          <FinancialSection financial={digest.financial} />
+          <FinancialSection financial={digest.financial} periodPhrase={periodPhrase} />
 
           {/* ── SECTION 9: denials ──────────────────────────────────────── */}
-          <DenialsSection denials={digest.denials} periodLabel={periodLabel} />
+          <DenialsSection denials={digest.denials} periodLabel={periodLabel} periodPhrase={periodPhrase} />
 
         </div>
       </div>
