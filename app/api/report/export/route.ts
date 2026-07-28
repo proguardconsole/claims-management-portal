@@ -55,6 +55,9 @@ const AGING_FILL: Record<string, string> = {
 // Financial column indices (1-based): Adj Fees=9 … Estimate=14
 const FIN_COLS = [9, 10, 11, 12, 13, 14]
 
+// Excel column letters for each financial column
+const FIN_COL_LETTER: Record<number, string> = { 9: 'I', 10: 'J', 11: 'K', 12: 'L', 13: 'M', 14: 'N' }
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 function solidFill(argb: string): ExcelJS.Fill {
@@ -227,21 +230,23 @@ function addClaimDataRow(ws: ExcelJS.Worksheet, r: ClaimRow, isClose = false): v
   if (agFill) row.getCell(8).fill = solidFill(agFill)
 }
 
-function addTotalsRow(ws: ExcelJS.Worksheet, rows: ClaimRow[], label: string, numCols: number): void {
-  const vals = new Array<number | string | null>(numCols).fill(null)
-  vals[0]  = label
-  vals[8]  = rows.reduce((s, r) => s + r.adjuster_fees,  0)
-  vals[9]  = rows.reduce((s, r) => s + r.billing_value,  0)
-  vals[10] = rows.reduce((s, r) => s + r.sf_collected,   0)
-  vals[11] = rows.reduce((s, r) => s + r.ded_collected,  0)
-  vals[12] = rows.reduce((s, r) => s + r.net_incurred,   0)
-  vals[13] = rows.reduce((s, r) => s + r.estimate_total, 0)
-
-  const row = ws.addRow(vals)
+function addTotalsRow(
+  ws: ExcelJS.Worksheet,
+  label: string,
+  dataStartRow: number,
+  dataEndRow: number,
+  numCols: number,
+): void {
+  // Add an empty row first so we know the totals row number
+  const row = ws.addRow(new Array(numCols).fill(null))
+  row.getCell(1).value = label
   row.font = { name: 'Arial', size: 10, bold: true }
+
   row.eachCell({ includeEmpty: true }, (cell, col) => {
     cell.fill = solidFill(LIGHT_GREEN)
     if (FIN_COLS.includes(col)) {
+      const letter = FIN_COL_LETTER[col]
+      cell.value     = { formula: `SUM(${letter}${dataStartRow}:${letter}${dataEndRow})`, result: 0 }
       cell.numFmt    = '$#,##0'
       cell.alignment = { horizontal: 'right' }
     }
@@ -258,8 +263,13 @@ function addClaimsSection(
   const numCols = isClose ? 17 : 16
   addSectionHdr(ws, title, numCols)
   addColHdrs(ws, isClose ? CLOSED_HDRS : OPEN_HDRS)
+
+  // Track data row range for SUM formulas — rowCount after col headers = last header row
+  const dataStartRow = ws.rowCount + 1
   for (const r of rows) addClaimDataRow(ws, r, isClose)
-  addTotalsRow(ws, rows, totalsLabel, numCols)
+  const dataEndRow = ws.rowCount  // last data row (= dataStartRow - 1 when empty, SUM returns 0)
+
+  addTotalsRow(ws, totalsLabel, dataStartRow, dataEndRow, numCols)
   ws.addRow([]) // spacer between sections
 }
 
@@ -304,8 +314,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const MAX_COLS = 17
 
   const wb = new ExcelJS.Workbook()
-  wb.creator = 'ProGuard Claims Portal'
-  wb.created = new Date()
+  wb.creator         = 'ProGuard Claims Portal'
+  wb.created         = new Date()
+  wb.calcProperties  = { fullCalcOnLoad: true }
 
   const ws = wb.addWorksheet('Ironwood')
   setColWidths(ws)
