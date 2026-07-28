@@ -793,21 +793,28 @@ export default function WeeklyReportPage() {
             Refresh
           </button>
 
-          <div
-            title="Coming soon"
+          <button
+            onClick={async () => {
+              const url = `/api/internal/report/export?as_of=${asOf}&week_start=${weekStart}`
+              const res = await fetch(url)
+              const blob = await res.blob()
+              const a = document.createElement('a')
+              a.href = URL.createObjectURL(blob)
+              a.download = `ProGuard_Claims_${asOf}.xlsx`
+              a.click()
+            }}
             style={{
               padding: '7px 14px', marginTop: 16,
               background: 'var(--bg-elevated)',
               border: '1px solid var(--border)',
               borderRadius: 4,
-              color: 'var(--text-tertiary)',
+              color: 'var(--text-primary)',
               fontSize: 13, fontWeight: 500,
-              cursor: 'not-allowed',
-              userSelect: 'none',
+              cursor: 'pointer',
             }}
           >
             Export Excel
-          </div>
+          </button>
         </div>
       </div>
 
