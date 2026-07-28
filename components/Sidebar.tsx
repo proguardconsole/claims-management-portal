@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   FileText,
   ClipboardCheck,
+  ClipboardList,
   Phone,
   TrendingUp,
   Archive,
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { label: 'Call Logs',       href: '/calls',         icon: Phone           },
   { label: 'Closed / Denied', href: '/closed',       icon: Archive         },
   { label: 'Weekly Digest',   href: '/digest',       icon: FileBarChart    },
+  { label: 'Weekly Report',   href: '/report',       icon: ClipboardList   },
 ]
 
 interface SidebarProps {

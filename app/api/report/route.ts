@@ -427,6 +427,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     closed_last_week:    closedRows.length,
   }
 
+  // ── Exclusions list (full detail for UI manager) ──────────────────────────
+
+  const { data: exclusionDetail } = await sb
+    .from('report_exclusions')
+    .select('field_service_number, reason, added_at')
+    .order('added_at', { ascending: false })
+
   // ── Response ──────────────────────────────────────────────────────────────
 
   return NextResponse.json({
@@ -440,5 +447,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     denied_this_week:     deniedRows,
     new_claims_this_week: newRows,
     pending_ust_pulls:    pendingRows,
+    exclusions:           exclusionDetail ?? [],
   })
 }
