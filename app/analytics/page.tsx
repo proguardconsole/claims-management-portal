@@ -58,39 +58,33 @@ type DwellDatum = {
   claim_count: number
 }
 
-type FinancialEstimate = {
-  pipeline: string
-  claims_with_estimates: number
-  total_estimated: number
-  avg_per_claim: number
-  total_contractor_costs: number
-  total_state_fees: number
-  total_adjuster_fees: number
-}
-
-type FinancialPayment = {
-  pipeline: string
-  claims_with_payments: number
-  total_paid_to_date: number
-  total_from_carrier: number
-  total_received_to_date: number
-}
-
 type FinancialTotals = {
   total_estimated: number
-  total_paid: number
-  total_from_carrier: number
-  total_received: number
-  collection_rate_pct: number
+  total_paid_out: number
+  remaining_exposure: number
+  from_carrier: number
+  to_contractor: number
+  to_customer: number
+  to_provider: number
+  received_to_date: number
+  open_claim_count: number
+}
+
+type FinancialByPipeline = {
+  pipeline: string
+  tank_type: string
+  claim_count: number
+  total_estimated: number
+  total_paid_out: number
+  remaining_exposure: number
 }
 
 type FinancialData = {
-  estimates: FinancialEstimate[]
-  payments: FinancialPayment[]
   totals: FinancialTotals
+  by_pipeline: FinancialByPipeline[]
 }
 
-type FinancialChartDatum = { pipeline: string; Estimated: number; Collected: number }
+type FinancialChartDatum = { pipeline: string; Estimated: number; 'Paid Out': number }
 
 type DenialTrendRow = {
   month: string
@@ -244,12 +238,6 @@ function formatDenialMonth(monthStr: string): string {
   return `${m} '${year.slice(2)}`
 }
 
-function collectionRateColor(pct: number): string {
-  if (pct > 80) return '#4CAF82'
-  if (pct >= 50) return '#E8C84A'
-  return '#E84A4A'
-}
-
 function groupReasons(reasons: DenialReason[], max = 6): GroupedReason[] {
   const mapped = reasons.map((r) => ({ label: r.claim_denied_reason, count: r.count }))
   if (mapped.length <= max) return mapped
@@ -259,16 +247,11 @@ function groupReasons(reasons: DenialReason[], max = 6): GroupedReason[] {
 }
 
 function buildFinancialChartData(financial: FinancialData): FinancialChartDatum[] {
-  const paymentByPipeline: Record<string, number> = {}
-  for (const p of financial.payments) paymentByPipeline[p.pipeline] = p.total_paid_to_date
-  return financial.estimates
-    .filter((e) => e.pipeline === 'AST' || e.pipeline === 'UST')
-    .map((e) => ({
-      pipeline: e.pipeline,
-      Estimated: e.total_estimated,
-      Collected: paymentByPipeline[e.pipeline] ?? 0,
-    }))
-    .sort((a, b) => a.pipeline.localeCompare(b.pipeline))
+  return financial.by_pipeline.map((r) => ({
+    pipeline:   r.pipeline,
+    Estimated:  r.total_estimated,
+    'Paid Out': r.total_paid_out,
+  }))
 }
 
 // ─── skeleton ──────────────────────────────────────────────────────────────────
@@ -1700,8 +1683,8 @@ function FinancialTooltip({
 }) {
   if (!active || !payload?.length) return null
   const estimated = payload.find((p) => p.dataKey === 'Estimated')?.value ?? 0
-  const collected = payload.find((p) => p.dataKey === 'Collected')?.value ?? 0
-  const rate = estimated > 0 ? ((collected / estimated) * 100).toFixed(1) : '0.0'
+  const paidOut   = payload.find((p) => p.dataKey === 'Paid Out')?.value ?? 0
+  const remaining = estimated - paidOut
   return (
     <div
       style={{
@@ -1718,23 +1701,61 @@ function FinancialTooltip({
         <span style={{ color: '#E8C84A', fontWeight: 500 }}>{fmtDollar(estimated)}</span>
       </div>
       <div style={{ color: 'var(--text-secondary)', marginBottom: 3 }}>
-        Collected:{' '}
-        <span style={{ color: '#4CAF82', fontWeight: 500 }}>{fmtDollar(collected)}</span>
+        Paid out:{' '}
+        <span style={{ color: '#4CAF82', fontWeight: 500 }}>{fmtDollar(paidOut)}</span>
       </div>
       <div style={{ color: 'var(--text-secondary)' }}>
-        Rate: <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{rate}%</span>
+        Remaining:{' '}
+        <span style={{ color: '#E84A4A', fontWeight: 500 }}>{fmtDollar(remaining)}</span>
       </div>
     </div>
   )
 }
 
 function FinancialExposureSection({ financial }: { financial: FinancialData }) {
-  const { totals, estimates } = financial
-  const chartData = buildFinancialChartData(financial)
+  const { totals } = financial
+  const chartData  = buildFinancialChartData(financial)
+  const totalRemaining = financial.by_pipeline.reduce((s, r) => s + r.remaining_exposure, 0)
 
-  const contractor = estimates.reduce((s, e) => s + e.total_contractor_costs, 0)
-  const stateFees  = estimates.reduce((s, e) => s + e.total_state_fees, 0)
-  const adjFees    = estimates.reduce((s, e) => s + e.total_adjuster_fees, 0)
+  const summaryTiles = [
+    {
+      label: 'Total Estimated',
+      value: fmtDollar(totals.total_estimated),
+      color: '#E8C84A',
+      sublabel: undefined as string | undefined,
+    },
+    {
+      label: 'Paid to Date',
+      value: fmtDollar(totals.total_paid_out),
+      color: 'var(--text-primary)',
+      sublabel: undefined as string | undefined,
+    },
+    {
+      label: 'Remaining Exposure',
+      value: fmtDollar(totals.remaining_exposure),
+      color: totals.remaining_exposure > 0 ? '#E84A4A' : '#4CAF82',
+      sublabel: 'Open claims only',
+    },
+    {
+      label: 'Received to Date',
+      value: fmtDollar(totals.received_to_date),
+      color: '#4CAF82',
+      sublabel: 'Deductibles + service fees',
+    },
+    {
+      label: 'Open Claims',
+      value: String(totals.open_claim_count),
+      color: 'var(--text-primary)',
+      sublabel: 'In exposure calculation',
+    },
+  ]
+
+  const breakdownRows = [
+    { label: 'From Carrier',  value: totals.from_carrier  },
+    { label: 'To Contractor', value: totals.to_contractor },
+    { label: 'To Customer',   value: totals.to_customer   },
+    { label: 'To Provider',   value: totals.to_provider   },
+  ]
 
   return (
     <div
@@ -1751,21 +1772,13 @@ function FinancialExposureSection({ financial }: { financial: FinancialData }) {
           Financial exposure
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>
-          Estimated liability vs. payments collected
+          Open claims only — current exposure snapshot
         </div>
       </div>
 
-      {/* Stat tiles */}
+      {/* Row 1 — five summary tiles */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
-        {[
-          { label: 'Total estimated',  value: fmtDollar(totals.total_estimated),    color: 'var(--text-primary)' },
-          { label: 'Total paid out',   value: fmtDollar(totals.total_paid),         color: 'var(--text-primary)' },
-          { label: 'From carrier',     value: fmtDollar(totals.total_from_carrier), color: 'var(--text-primary)' },
-          { label: 'Received to date', value: fmtDollar(totals.total_received),     color: 'var(--text-primary)' },
-          { label: 'Collection rate',
-            value: `${totals.collection_rate_pct.toFixed(1)}%`,
-            color: collectionRateColor(totals.collection_rate_pct) },
-        ].map(({ label, value, color }) => (
+        {summaryTiles.map(({ label, value, color, sublabel }) => (
           <div
             key={label}
             style={{
@@ -1788,73 +1801,115 @@ function FinancialExposureSection({ financial }: { financial: FinancialData }) {
               {label}
             </div>
             <div style={{ fontSize: 20, fontWeight: 700, color }}>{value}</div>
+            {sublabel && (
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                {sublabel}
+              </div>
+            )}
           </div>
         ))}
       </div>
 
-      {/* Grouped bar chart */}
-      <ResponsiveContainer width="100%" height={220}>
-        <BarChart
-          data={chartData}
-          margin={{ top: 8, right: 16, left: 16, bottom: 4 }}
-          barGap={6}
-          barCategoryGap={40}
+      {/* Row 2 — breakdown panel + bar chart */}
+      <div style={{ display: 'flex', gap: 20 }}>
+        {/* Left: Paid to Date breakdown */}
+        <div
+          style={{
+            width: 200,
+            flexShrink: 0,
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border)',
+            borderRadius: 5,
+            padding: '14px 16px',
+          }}
         >
-          <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
-          <XAxis
-            dataKey="pipeline"
-            axisLine={false}
-            tickLine={false}
-            tick={{ fill: 'var(--text-secondary)', fontSize: 12 }}
-          />
-          <YAxis
-            axisLine={false}
-            tickLine={false}
-            tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }}
-            tickFormatter={(v: number) => fmtK(v)}
-          />
-          <Tooltip content={<FinancialTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-          <Bar dataKey="Estimated" fill="#E8C84A" radius={[3, 3, 0, 0]} barSize={28} name="Estimated" />
-          <Bar dataKey="Collected" fill="#4CAF82" radius={[3, 3, 0, 0]} barSize={28} name="Collected" />
-        </BarChart>
-      </ResponsiveContainer>
-
-      {/* Chart legend */}
-      <div style={{ display: 'flex', gap: 20, marginTop: 12, justifyContent: 'center' }}>
-        {[
-          { color: '#E8C84A', label: 'Estimated' },
-          { color: '#4CAF82', label: 'Collected' },
-        ].map(({ color, label }) => (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div
-              style={{ width: 12, height: 12, borderRadius: 3, background: color, flexShrink: 0 }}
-            />
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Cost breakdown pills */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
-        {[
-          { label: 'Contractor', value: contractor },
-          { label: 'State fees', value: stateFees },
-          { label: 'Adj. fees',  value: adjFees },
-        ].map(({ label, value }) => (
           <div
-            key={label}
             style={{
-              padding: '4px 10px',
-              borderRadius: 999,
-              background: 'rgba(232, 200, 74, 0.15)',
-              fontSize: 12,
-              color: '#E8C84A',
-              whiteSpace: 'nowrap',
+              fontSize: 11,
+              color: 'var(--text-tertiary)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              marginBottom: 12,
             }}
           >
-            {label}: {fmtK(value)}
+            Paid to Date — by type
           </div>
-        ))}
+          {breakdownRows.map(({ label, value }) => (
+            <div
+              key={label}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                paddingBottom: 8,
+                marginBottom: 8,
+                borderBottom: '1px solid var(--border)',
+              }}
+            >
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                {fmtK(value)}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Right: AST vs UST bar chart */}
+        <div style={{ flex: 1 }}>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart
+              data={chartData}
+              margin={{ top: 8, right: 16, left: 16, bottom: 4 }}
+              barGap={6}
+              barCategoryGap={40}
+            >
+              <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
+              <XAxis
+                dataKey="pipeline"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: 'var(--text-secondary)', fontSize: 12 }}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }}
+                tickFormatter={(v: number) => fmtK(v)}
+              />
+              <Tooltip content={<FinancialTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+              <Bar dataKey="Estimated" fill="#E8C84A" radius={[3, 3, 0, 0]} barSize={28} name="Estimated" />
+              <Bar dataKey="Paid Out"  fill="#4CAF82" radius={[3, 3, 0, 0]} barSize={28} name="Paid Out" />
+            </BarChart>
+          </ResponsiveContainer>
+
+          {/* Legend + remaining exposure pill */}
+          <div style={{ display: 'flex', gap: 20, marginTop: 12, justifyContent: 'center', alignItems: 'center' }}>
+            {[
+              { color: '#E8C84A', label: 'Estimated' },
+              { color: '#4CAF82', label: 'Paid Out' },
+            ].map(({ color, label }) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div
+                  style={{ width: 12, height: 12, borderRadius: 3, background: color, flexShrink: 0 }}
+                />
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</span>
+              </div>
+            ))}
+            <div
+              style={{
+                marginLeft: 8,
+                padding: '3px 10px',
+                borderRadius: 999,
+                background: 'rgba(232, 74, 74, 0.15)',
+                fontSize: 12,
+                color: '#E84A4A',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Remaining: {fmtDollar(totalRemaining)}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

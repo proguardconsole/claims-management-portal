@@ -294,129 +294,137 @@ async function viewStale(sb: SB) {
 }
 
 // ── VIEW 5: financial ──────────────────────────────────────────────────────────
-// Financial exposure overview: estimates and payments aggregated by pipeline.
-// estimates table uses estimate_total as the top-level amount; subtotals
-// (contractor_costs, state_fees, adjuster_fees) are also present and included.
-// claim_payments table uses the `amount` column.
+// Financial exposure overview scoped to open claims only (ast_open + ust_open).
+// Answers: what are we exposed to right now?
 
 async function viewFinancial(sb: SB) {
-  const [estimatesRes, paymentsRes, claimsRes] = await Promise.all([
+  // Step 1 — fetch open claims to get the scoping IDs
+  const { data: openClaims, error: claimsErr } = await sb
+    .from('claims')
+    .select('id, tank_type')
+    .in('claim_status', ['ast_open', 'ust_open'])
+    .not('owner_name', 'ilike', '%admin%')
+
+  if (claimsErr) throw new Error(claimsErr.message)
+
+  const openClaimIds = (openClaims ?? []).map((c) => c.id)
+
+  if (openClaimIds.length === 0) {
+    return {
+      totals: {
+        total_estimated: 0, total_paid_out: 0, remaining_exposure: 0,
+        from_carrier: 0, to_contractor: 0, to_customer: 0, to_provider: 0,
+        received_to_date: 0, open_claim_count: 0,
+      },
+      by_pipeline: [],
+    }
+  }
+
+  // Step 2 — fetch estimates and payments scoped to those IDs
+  const [estimatesRes, paymentsRes] = await Promise.all([
     sb
       .from('estimates')
-      .select('claim_id, estimate_total, contractor_costs, state_fees, adjuster_fees')
-      .not('claim_id', 'is', null),
+      .select('claim_id, estimate_total')
+      .in('claim_id', openClaimIds),
     sb
       .from('claim_payments')
-      .select('claim_id, amount, incoming_or_outgoing, account_name')
-      .not('claim_id', 'is', null),
-    sb
-      .from('claims')
-      .select('id, tank_type')
-      .not('owner_name', 'ilike', '%admin%'),
+      .select('claim_id, amount, payment_type, incoming_or_outgoing, account_name, related_type')
+      .in('claim_id', openClaimIds),
   ])
 
   if (estimatesRes.error) throw new Error(estimatesRes.error.message)
   if (paymentsRes.error) throw new Error(paymentsRes.error.message)
-  if (claimsRes.error) throw new Error(claimsRes.error.message)
 
   const pipelineByClaimId: Record<string, string> = {}
-  for (const c of claimsRes.data ?? []) {
+  for (const c of openClaims ?? []) {
     pipelineByClaimId[c.id] = normalizePipeline(c.tank_type)
   }
 
-  // Estimates aggregation — one claim can have multiple estimates (one per FS record)
-  type EstAgg = {
-    claimsSet: Record<string, true>
-    total_estimated: number
-    total_contractor_costs: number
-    total_state_fees: number
-    total_adjuster_fees: number
-  }
-  const estAgg: Record<string, EstAgg> = {}
-
+  // Aggregate estimates per claim (MAX estimate_total per claim_id across rows)
+  const maxEstByClaimId: Record<string, number> = {}
   for (const e of estimatesRes.data ?? []) {
-    const pipeline = pipelineByClaimId[e.claim_id ?? ''] ?? 'Other'
-    if (!estAgg[pipeline]) {
-      estAgg[pipeline] = {
-        claimsSet: {},
-        total_estimated: 0,
-        total_contractor_costs: 0,
-        total_state_fees: 0,
-        total_adjuster_fees: 0,
-      }
-    }
-    if (e.claim_id) estAgg[pipeline].claimsSet[e.claim_id] = true
-    estAgg[pipeline].total_estimated      += (e.estimate_total     as number) ?? 0
-    estAgg[pipeline].total_contractor_costs += (e.contractor_costs as number) ?? 0
-    estAgg[pipeline].total_state_fees     += (e.state_fees         as number) ?? 0
-    estAgg[pipeline].total_adjuster_fees  += (e.adjuster_fees      as number) ?? 0
+    const cid = e.claim_id as string | null
+    if (!cid) continue
+    const et = (e.estimate_total as number | null) ?? 0
+    maxEstByClaimId[cid] = Math.max(maxEstByClaimId[cid] ?? 0, et)
   }
 
-  const estimates = Object.keys(estAgg).map((pipeline) => {
-    const a = estAgg[pipeline]
-    const claimsCount = Object.keys(a.claimsSet).length
-    return {
-      pipeline,
-      claims_with_estimates: claimsCount,
-      total_estimated: round1(a.total_estimated),
-      avg_per_claim: round1(claimsCount > 0 ? a.total_estimated / claimsCount : 0),
-      total_contractor_costs: round1(a.total_contractor_costs),
-      total_state_fees: round1(a.total_state_fees),
-      total_adjuster_fees: round1(a.total_adjuster_fees),
-    }
-  })
-
-  // Payments aggregation
-  type PmtAgg = {
-    claimsSet: Record<string, true>
-    total_paid_to_date: number
-    total_from_carrier: number
-    total_received_to_date: number
+  // Per-pipeline estimate aggregation
+  type PipelineAgg = {
+    claim_count: number
+    total_estimated: number
+    total_paid_out: number
   }
-  const pmtAgg: Record<string, PmtAgg> = {}
+  const pipelineAgg: Record<string, PipelineAgg> = {}
+
+  for (const c of openClaims ?? []) {
+    const pl = normalizePipeline(c.tank_type)
+    if (!pipelineAgg[pl]) pipelineAgg[pl] = { claim_count: 0, total_estimated: 0, total_paid_out: 0 }
+    pipelineAgg[pl].claim_count++
+    pipelineAgg[pl].total_estimated += maxEstByClaimId[c.id] ?? 0
+  }
+
+  // Payment aggregation — apply same filter rules as KPI route
+  let total_paid_out    = 0
+  let from_carrier      = 0
+  let to_contractor     = 0
+  let to_customer       = 0
+  let to_provider       = 0
+  let received_to_date  = 0
 
   for (const p of paymentsRes.data ?? []) {
-    const pipeline = pipelineByClaimId[p.claim_id ?? ''] ?? 'Other'
-    if (!pmtAgg[pipeline]) pmtAgg[pipeline] = { claimsSet: {}, total_paid_to_date: 0, total_from_carrier: 0, total_received_to_date: 0 }
-    if (p.claim_id) pmtAgg[pipeline].claimsSet[p.claim_id] = true
-    const amt = (p.amount as number) ?? 0
-    if (p.incoming_or_outgoing === 'Outgoing' && p.account_name !== 'Claim Adjusters') {
-      pmtAgg[pipeline].total_paid_to_date += amt
+    const cid  = p.claim_id as string | null
+    const amt  = (p.amount as number | null) ?? 0
+    const io   = p.incoming_or_outgoing as string | null
+    const pt   = p.payment_type as string | null
+    const acct = p.account_name as string | null
+    const rt   = p.related_type as string | null
+
+    const isClaimPayout = pt === 'Claim Payout'
+    const isOutgoing    = io === 'Outgoing'
+    const isIncoming    = io === 'Incoming'
+    const isAdjRow      = acct === 'Claim Adjusters'
+    const isCarrierRow  = acct === 'Claim Adjusters - Recoverable from Carrier'
+
+    if (isClaimPayout && isOutgoing && !isAdjRow) {
+      total_paid_out += amt
+      if (cid) pipelineAgg[pipelineByClaimId[cid] ?? 'Other'].total_paid_out += amt
     }
-    if (p.incoming_or_outgoing === 'Outgoing' && p.account_name === 'Claim Adjusters - Recoverable from Carrier') {
-      pmtAgg[pipeline].total_from_carrier += amt
-    }
-    if (p.incoming_or_outgoing === 'Incoming') {
-      pmtAgg[pipeline].total_received_to_date += amt
-    }
+    if (isClaimPayout && isOutgoing && isCarrierRow) from_carrier   += amt
+    if (isClaimPayout && isOutgoing && rt === 'Contractor' && !isAdjRow && !isCarrierRow) to_contractor += amt
+    if (isClaimPayout && isOutgoing && rt === 'Policy Holder') to_customer   += amt
+    if (isClaimPayout && isOutgoing && rt === 'Provider')      to_provider   += amt
+    if (isIncoming) received_to_date += amt
   }
 
-  const payments = Object.keys(pmtAgg).map((pipeline) => ({
-    pipeline,
-    claims_with_payments:   Object.keys(pmtAgg[pipeline].claimsSet).length,
-    total_paid_to_date:     round1(pmtAgg[pipeline].total_paid_to_date),
-    total_from_carrier:     round1(pmtAgg[pipeline].total_from_carrier),
-    total_received_to_date: round1(pmtAgg[pipeline].total_received_to_date),
-  }))
+  const total_estimated    = Object.values(maxEstByClaimId).reduce((s, v) => s + v, 0)
+  const remaining_exposure = total_estimated - total_paid_out
 
-  // Cross-pipeline totals
-  const total_estimated    = estimates.reduce((s, r) => s + r.total_estimated, 0)
-  const total_paid_to_date = payments.reduce((s, r) => s + r.total_paid_to_date, 0)
-  const total_from_carrier = payments.reduce((s, r) => s + r.total_from_carrier, 0)
-  const total_received     = payments.reduce((s, r) => s + r.total_received_to_date, 0)
-  const collection_rate_pct =
-    total_estimated > 0 ? round1((total_received / total_estimated) * 100) : 0
+  const by_pipeline = Object.entries(pipelineAgg)
+    .filter(([pl]) => pl === 'AST' || pl === 'UST')
+    .map(([pl, a]) => ({
+      pipeline:           pl,
+      tank_type:          pl,
+      claim_count:        a.claim_count,
+      total_estimated:    round1(a.total_estimated),
+      total_paid_out:     round1(a.total_paid_out),
+      remaining_exposure: round1(a.total_estimated - a.total_paid_out),
+    }))
+    .sort((a, b) => a.pipeline.localeCompare(b.pipeline))
 
   return {
-    estimates,
-    payments,
     totals: {
-      total_estimated:     round1(total_estimated),
-      total_paid:          round1(total_paid_to_date),
-      total_from_carrier:  round1(total_from_carrier),
-      total_received:      round1(total_received),
-      collection_rate_pct,
+      total_estimated:    round1(total_estimated),
+      total_paid_out:     round1(total_paid_out),
+      remaining_exposure: round1(remaining_exposure),
+      from_carrier:       round1(from_carrier),
+      to_contractor:      round1(to_contractor),
+      to_customer:        round1(to_customer),
+      to_provider:        round1(to_provider),
+      received_to_date:   round1(received_to_date),
+      open_claim_count:   openClaimIds.length,
     },
+    by_pipeline,
   }
 }
 
