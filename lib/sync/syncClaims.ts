@@ -2,9 +2,9 @@ import { createClient } from '@supabase/supabase-js'
 import { zohoClient } from '../zoho/client'
 import { getClaimDeepLink } from '../constants/zoho'
 
-const supabase = createClient(
+const getSupabase = () => createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 )
 
 const ZOHO_MODULE = 'Deals'
@@ -157,7 +157,7 @@ function mapRecord(record: ZohoRecord, syncedAt: string) {
 }
 
 async function loadStoredStages(): Promise<Map<string, StoredClaim>> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('claims')
     .select('id, stage, field_service_number')
   if (error) throw new Error(`Failed to load stored claim stages: ${error.message}`)
@@ -235,7 +235,7 @@ export async function syncClaims(): Promise<void> {
     const batchNum = Math.floor(i / UPSERT_BATCH_SIZE) + 1
     const totalBatches = Math.ceil(mapped.length / UPSERT_BATCH_SIZE)
 
-    const { error } = await supabase
+    const { error } = await getSupabase()
       .from('claims')
       .upsert(chunk, { onConflict: 'id' })
 
@@ -264,7 +264,7 @@ export async function syncClaims(): Promise<void> {
 
   for (let i = 0; i < transitionEvents.length; i += UPSERT_BATCH_SIZE) {
     const chunk = transitionEvents.slice(i, i + UPSERT_BATCH_SIZE)
-    const { error } = await supabase
+    const { error } = await getSupabase()
       .from('claim_events')
       .upsert(chunk, { onConflict: 'id' })
     if (error) {

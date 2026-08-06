@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { threeCXClient } from '../3cx/client'
 
-const supabase = createClient(
+const getSupabase = () => createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
@@ -112,7 +112,7 @@ export async function syncCallLogs(): Promise<void> {
     const chunk = mapped.slice(i, i + UPSERT_BATCH_SIZE)
     const batchNum = Math.floor(i / UPSERT_BATCH_SIZE) + 1
 
-    const { error } = await supabase
+    const { error } = await getSupabase()
       .from('call_logs')
       .upsert(chunk, { onConflict: 'id' })
 

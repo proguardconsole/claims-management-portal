@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+
+export const dynamic = 'force-dynamic'
 import { syncClaims } from '../../../lib/sync/syncClaims'
 import { syncCallLogs } from '../../../lib/sync/syncCallLogs'
 import { syncEstimates } from '../../../lib/sync/syncEstimates'

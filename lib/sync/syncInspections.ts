@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { zohoClient } from '../zoho/client'
 
-const supabase = createClient(
+const getSupabase = () => createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 )
@@ -91,7 +91,7 @@ export async function syncInspections(): Promise<InspectionSyncResult> {
     const batchNum = Math.floor(i / UPSERT_BATCH_SIZE) + 1
     const totalBatches = Math.ceil(mapped.length / UPSERT_BATCH_SIZE)
 
-    const { error } = await supabase
+    const { error } = await getSupabase()
       .from('inspections')
       .upsert(chunk, { onConflict: 'id' })
 
