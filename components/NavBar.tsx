@@ -45,6 +45,7 @@ export default function NavBar() {
     >
       {/* Left — logo */}
       <div style={{ display: 'flex', alignItems: 'center' }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="https://septic.proguardplans.com/logo-white.png"
           alt="ProGuard"
