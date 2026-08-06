@@ -413,7 +413,12 @@ function ExclusionManager({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ field_service_number: fsn }),
       })
-      if (!res.ok) { const j = await res.json(); setErr(j.error ?? 'Error'); return }
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try { const j = await res.json(); msg = j.error ?? msg } catch { /* empty or non-JSON body */ }
+        setErr(msg)
+        return
+      }
       setNewFsn('')
       onRefetch()
     } catch (e) {
@@ -541,7 +546,12 @@ function ManualDenialForm({ onRefetch }: { onRefetch: () => void }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       })
-      if (!res.ok) { const j = await res.json(); setErr(j.error ?? 'Error'); return }
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try { const j = await res.json(); msg = j.error ?? msg } catch { /* empty or non-JSON body */ }
+        setErr(msg)
+        return
+      }
       setForm({ claim_reference: '', contact_name: '', trigger: '', tank_type: 'UST', denial_date: todayStr(), notes: '' })
       setExpanded(false)
       onRefetch()
@@ -695,7 +705,12 @@ export default function WeeklyReportPage() {
     setLoading(true); setError(null)
     try {
       const res = await fetch(`/api/internal/report?as_of=${ao}&week_start=${ws}`)
-      if (!res.ok) { const j = await res.json(); setError(j.error ?? 'Failed to load report'); return }
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try { const j = await res.json(); msg = j.error ?? msg } catch { /* empty or non-JSON body */ }
+        setError(msg)
+        return
+      }
       const j: ReportData = await res.json()
       setData(j)
     } catch (e) {
