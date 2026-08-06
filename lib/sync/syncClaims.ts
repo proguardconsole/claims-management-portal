@@ -11,6 +11,20 @@ const ZOHO_MODULE = 'Deals'
 const PAGE_SIZE = 200
 const UPSERT_BATCH_SIZE = 100
 
+type StoredClaim = { stage: string | null; field_service_number: string | null }
+
+type ClaimTransitionEvent = {
+  id: string
+  claim_id: string
+  field_service_number: string | null
+  stage: string
+  entered_at: string
+  days_in_stage: null
+  modified_by_name: null
+  modified_by_id: null
+  synced_at: string
+}
+
 type ZohoRecord = Record<string, unknown>
 
 // Safe accessor for nested Zoho lookup objects e.g. record.Owner?.name
@@ -142,8 +156,29 @@ function mapRecord(record: ZohoRecord, syncedAt: string) {
   }
 }
 
+async function loadStoredStages(): Promise<Map<string, StoredClaim>> {
+  const { data, error } = await supabase
+    .from('claims')
+    .select('id, stage, field_service_number')
+  if (error) throw new Error(`Failed to load stored claim stages: ${error.message}`)
+  const map = new Map<string, StoredClaim>()
+  for (const c of data ?? []) {
+    map.set(c.id as string, {
+      stage: c.stage as string | null,
+      field_service_number: c.field_service_number as string | null,
+    })
+  }
+  return map
+}
+
 export async function syncClaims(): Promise<void> {
   const syncedAt = new Date().toISOString()
+
+  // Load stored stages before fetching Zoho — needed to detect transitions
+  console.log('  Loading stored claim stages from Supabase...')
+  const storedStages = await loadStoredStages()
+  console.log(`  ${storedStages.size} existing claims in DB`)
+
   const allRecords: ZohoRecord[] = []
 
   // Paginate through all Zoho Deals records
@@ -167,7 +202,31 @@ export async function syncClaims(): Promise<void> {
   // Map all records to Supabase shape
   const mapped = allRecords.map((r) => mapRecord(r, syncedAt))
 
-  // Upsert in batches of 100
+  // Detect stage transitions by comparing incoming stage to what's stored in DB.
+  // A synthetic deterministic ID ({claim_id}_{stage}) makes this upsert idempotent:
+  // if a claim re-enters the same stage, entered_at is refreshed rather than duplicated.
+  const transitionEvents: ClaimTransitionEvent[] = []
+  for (const m of mapped) {
+    const incomingStage = m.stage
+    if (!incomingStage) continue
+    const stored = storedStages.get(m.id)
+    const storedStage = stored?.stage || null
+    if (incomingStage !== storedStage) {
+      transitionEvents.push({
+        id: `${m.id}_${incomingStage}`,
+        claim_id: m.id,
+        field_service_number: m.field_service_number ?? stored?.field_service_number ?? null,
+        stage: incomingStage,
+        entered_at: syncedAt,
+        days_in_stage: null,
+        modified_by_name: null,
+        modified_by_id: null,
+        synced_at: syncedAt,
+      })
+    }
+  }
+
+  // Upsert claims in batches of 100
   let totalUpserted = 0
   let totalErrors = 0
 
@@ -189,7 +248,35 @@ export async function syncClaims(): Promise<void> {
     }
   }
 
-  console.log(`\nSync complete.`)
+  console.log(`\nClaims sync complete.`)
   console.log(`  Upserted: ${totalUpserted}`)
   console.log(`  Errors:   ${totalErrors}`)
+
+  // Write transition events — runs after claims upsert so the stage change is committed first
+  if (transitionEvents.length === 0) {
+    console.log(`  No stage transitions detected.`)
+    return
+  }
+
+  console.log(`\n  Writing ${transitionEvents.length} stage transition event(s)...`)
+  let eventsWritten = 0
+  let eventsErrored = 0
+
+  for (let i = 0; i < transitionEvents.length; i += UPSERT_BATCH_SIZE) {
+    const chunk = transitionEvents.slice(i, i + UPSERT_BATCH_SIZE)
+    const { error } = await supabase
+      .from('claim_events')
+      .upsert(chunk, { onConflict: 'id' })
+    if (error) {
+      console.error(`  claim_events batch error:`, error.message)
+      eventsErrored += chunk.length
+    } else {
+      eventsWritten += chunk.length
+    }
+  }
+
+  console.log(`  Transition events written: ${eventsWritten}  Errors: ${eventsErrored}`)
+  for (const e of transitionEvents) {
+    console.log(`    ${e.field_service_number ?? e.claim_id}: → ${e.stage}`)
+  }
 }

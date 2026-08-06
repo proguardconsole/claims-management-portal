@@ -4,7 +4,6 @@ import { syncCallLogs } from '../../../lib/sync/syncCallLogs'
 import { syncEstimates } from '../../../lib/sync/syncEstimates'
 import { syncPayments } from '../../../lib/sync/syncPayments'
 import { syncInspections } from '../../../lib/sync/syncInspections'
-import { syncStageHistory } from '../../../lib/sync/syncStageHistory'
 
 async function runSync(): Promise<NextResponse> {
   const start = Date.now()
@@ -30,18 +29,14 @@ async function runSync(): Promise<NextResponse> {
     console.log('\n[sync] syncInspections starting...')
     const inspectionsResult = await syncInspections()
 
-    console.log('\n[sync] syncStageHistory starting...')
-    const stageHistoryResult = await syncStageHistory()
-
     return NextResponse.json({
       success: true,
       elapsed_ms: Date.now() - start,
-      claims:        { elapsed_ms: claimsElapsed },
-      call_logs:     { elapsed_ms: callLogsElapsed },
-      estimates:     estimatesResult,
-      payments:      paymentsResult,
-      inspections:   inspectionsResult,
-      stage_history: stageHistoryResult,
+      claims:     { elapsed_ms: claimsElapsed },
+      call_logs:  { elapsed_ms: callLogsElapsed },
+      estimates:  estimatesResult,
+      payments:   paymentsResult,
+      inspections: inspectionsResult,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
