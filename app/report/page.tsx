@@ -711,7 +711,13 @@ export default function WeeklyReportPage() {
         setError(msg)
         return
       }
-      const j: ReportData = await res.json()
+      let j: ReportData
+      try {
+        j = await res.json()
+      } catch {
+        setError('Report response could not be parsed — refresh to retry')
+        return
+      }
       setData(j)
     } catch (e) {
       setError(String(e))
