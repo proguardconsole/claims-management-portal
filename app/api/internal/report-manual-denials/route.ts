@@ -8,13 +8,26 @@ async function proxy(req: NextRequest): Promise<NextRequest> {
     method:  req.method,
     headers: { ...Object.fromEntries(req.headers), Authorization: `Bearer ${process.env.CRON_SECRET ?? ''}` },
     body:    bodyText,
-  })
+    // duplex is required by undici for any body-bearing Request construction
+    ...(bodyText !== undefined && { duplex: 'half' }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any)
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  return mdGET(await proxy(req))
+  try {
+    return await mdGET(await proxy(req))
+  } catch (err) {
+    console.error('[internal/report-manual-denials GET] unhandled error:', err instanceof Error ? err.stack : String(err))
+    return NextResponse.json({ error: String(err) }, { status: 500 })
+  }
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  return mdPOST(await proxy(req))
+  try {
+    return await mdPOST(await proxy(req))
+  } catch (err) {
+    console.error('[internal/report-manual-denials POST] unhandled error:', err instanceof Error ? err.stack : String(err))
+    return NextResponse.json({ error: String(err) }, { status: 500 })
+  }
 }

@@ -10,5 +10,10 @@ export async function DELETE(
     method:  'DELETE',
     headers: { Authorization: `Bearer ${process.env.CRON_SECRET ?? ''}` },
   })
-  return excDEL(proxyReq, { params })
+  try {
+    return await excDEL(proxyReq, { params })
+  } catch (err) {
+    console.error('[internal/report-exclusions DELETE] unhandled error:', err instanceof Error ? err.stack : String(err))
+    return NextResponse.json({ error: String(err) }, { status: 500 })
+  }
 }

@@ -18,7 +18,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!authOk(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const body = await req.json() as { field_service_number: string; reason?: string; added_by?: string }
+  let body: { field_service_number: string; reason?: string; added_by?: string }
+  try {
+    body = await req.json() as typeof body
+  } catch {
+    return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 })
+  }
   if (!body.field_service_number) return NextResponse.json({ error: 'field_service_number required' }, { status: 400 })
   const sb = getServerSupabase()
   const { error } = await sb.from('report_exclusions').insert({
