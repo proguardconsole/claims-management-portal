@@ -14,9 +14,19 @@ async function proxy(req: NextRequest, path: string): Promise<NextRequest> {
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  return excGET(await proxy(req, ''))
+  try {
+    return await excGET(await proxy(req, ''))
+  } catch (err) {
+    console.error('[internal/report-exclusions GET] unhandled error:', err instanceof Error ? err.stack : String(err))
+    return NextResponse.json({ error: String(err) }, { status: 500 })
+  }
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  return excPOST(await proxy(req, ''))
+  try {
+    return await excPOST(await proxy(req, ''))
+  } catch (err) {
+    console.error('[internal/report-exclusions POST] unhandled error:', err instanceof Error ? err.stack : String(err))
+    return NextResponse.json({ error: String(err) }, { status: 500 })
+  }
 }
