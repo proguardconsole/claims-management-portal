@@ -415,6 +415,7 @@ function ExclusionManager({
         headers: { 'Content-Type': 'application/json' },
         body: reqBody,
       })
+      console.error('EXCLUSION_DEBUG', { status: res.status, ok: res.ok, statusText: res.statusText, headers: Object.fromEntries(res.headers.entries()) })
       console.log('[handleAdd] POST response: status=%d ok=%s ct=%s cl=%s',
         res.status, res.ok,
         res.headers.get('content-type'),
