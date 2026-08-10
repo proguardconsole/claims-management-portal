@@ -408,18 +408,11 @@ function ExclusionManager({
     if (!fsn) return
     setAdding(true); setErr(null)
     try {
-      const reqBody = JSON.stringify({ field_service_number: fsn })
-      console.log('[handleAdd] POST body:', reqBody)
       const res = await fetch('/api/internal/report-exclusions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: reqBody,
+        body: JSON.stringify({ field_service_number: fsn }),
       })
-      console.error('EXCLUSION_DEBUG', { status: res.status, ok: res.ok, statusText: res.statusText, headers: Object.fromEntries(res.headers.entries()) })
-      console.log('[handleAdd] POST response: status=%d ok=%s ct=%s cl=%s',
-        res.status, res.ok,
-        res.headers.get('content-type'),
-        res.headers.get('content-length'))
       if (!res.ok) {
         let msg = `HTTP ${res.status}`
         try { const j = await res.json(); msg = j.error ?? msg } catch { /* empty or non-JSON body */ }
@@ -429,7 +422,6 @@ function ExclusionManager({
       setNewFsn('')
       onRefetch()
     } catch (e) {
-      console.error('[handleAdd] caught:', e)
       setErr(String(e))
     } finally {
       setAdding(false)

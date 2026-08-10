@@ -8,7 +8,10 @@ async function proxy(req: NextRequest): Promise<NextRequest> {
     method:  req.method,
     headers: { ...Object.fromEntries(req.headers), Authorization: `Bearer ${process.env.CRON_SECRET ?? ''}` },
     body:    bodyText,
-  })
+    // duplex is required by undici for any body-bearing Request construction
+    ...(bodyText !== undefined && { duplex: 'half' }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any)
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
