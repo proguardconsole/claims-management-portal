@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
 
+export const dynamic = 'force-dynamic'
+
 // ─── constants ────────────────────────────────────────────────────────────────
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24
