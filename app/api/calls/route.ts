@@ -6,7 +6,7 @@ import { getServerSupabase } from '../../../lib/supabase/server'
 const SEPTIC_BASE_URL = 'https://mtqawtilhjivmahbmaiz.supabase.co/rest/v1'
 
 const AGENT_COLE = 'Cole Anderson'
-const AGENT_SHAWN = 'Shawn C. Zagryn'
+const AGENT_NICK = 'Nick Alexander'
 
 const DEFAULT_DAYS = 30
 const MAX_DAYS = 90
@@ -104,7 +104,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const { searchParams } = req.nextUrl
   const daysParam  = searchParams.get('days')
-  const agentParam = searchParams.get('agent')   // 'cole' | 'shawn' | null
+  const agentParam = searchParams.get('agent')   // 'cole' | 'nick' | null
   const answeredParam = searchParams.get('answered') // 'true' | 'false' | null
 
   const days = clampDays(daysParam)
@@ -129,10 +129,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   if (agentParam === 'cole') {
     params.set('agent_name', `eq.${AGENT_COLE}`)
-  } else if (agentParam === 'shawn') {
-    params.set('agent_name', `eq.${AGENT_SHAWN}`)
+  } else if (agentParam === 'nick') {
+    params.set('agent_name', `eq.${AGENT_NICK}`)
   } else {
-    params.set('agent_name', `in.("${AGENT_COLE}","${AGENT_SHAWN}")`)
+    params.set('agent_name', `in.("${AGENT_COLE}","${AGENT_NICK}")`)
   }
 
   if (answeredParam === 'true')  params.set('answered', 'eq.true')

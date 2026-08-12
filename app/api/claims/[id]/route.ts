@@ -3,7 +3,7 @@ import { getServerSupabase } from '../../../../lib/supabase/server'
 
 const SEPTIC_BASE = 'https://mtqawtilhjivmahbmaiz.supabase.co/rest/v1'
 const AGENT_COLE = 'Cole Anderson'
-const AGENT_SHAWN = 'Shawn C. Zagryn'
+const AGENT_NICK = 'Nick Alexander'
 
 type SepticCall = {
   id: string
@@ -87,7 +87,7 @@ export async function GET(
       'select',
       'id,direction,caller_phone,caller_name,agent_name,started_at,duration_sec,answered,inferred_summary,inferred_sentiment,inferred_risk_flags,inferred_topics',
     )
-    params.set('agent_name', `in.("${AGENT_COLE}","${AGENT_SHAWN}")`)
+    params.set('agent_name', `in.("${AGENT_COLE}","${AGENT_NICK}")`)
     params.set('caller_phone', `ilike.*${digits}*`)
     params.set('order', 'started_at.desc')
     params.set('limit', '20')

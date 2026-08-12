@@ -35,7 +35,7 @@ type Meta = {
 }
 
 type ActiveTab  = 'all' | 'linked' | 'inbound' | 'outbound' | 'risk'
-type AgentFilter = 'all' | 'cole' | 'shawn'
+type AgentFilter = 'all' | 'cole' | 'nick'
 type DaysFilter  = 1 | 7 | 30
 
 // ─── constants ─────────────────────────────────────────────────────────────────
@@ -443,7 +443,7 @@ export default function CallLogsPage() {
       if (activeTab === 'risk'     && (call.inferred_risk_flags?.length ?? 0) === 0) return false
 
       if (agentFilter === 'cole'  && !call.agent_name.toLowerCase().includes('cole'))  return false
-      if (agentFilter === 'shawn' && !call.agent_name.toLowerCase().includes('shawn')) return false
+      if (agentFilter === 'nick'  && !call.agent_name.toLowerCase().includes('nick'))  return false
 
       if (topicFilter.length > 0) {
         const ct = call.inferred_topics ?? []
@@ -636,9 +636,9 @@ export default function CallLogsPage() {
 
           {/* agent pills */}
           <div style={{ display: 'flex', gap: 2 }}>
-            {(['all', 'cole', 'shawn'] as AgentFilter[]).map((a) => {
+            {(['all', 'cole', 'nick'] as AgentFilter[]).map((a) => {
               const active = agentFilter === a
-              const label = a === 'all' ? 'All agents' : a === 'cole' ? 'Cole' : 'Shawn'
+              const label = a === 'all' ? 'All agents' : a === 'cole' ? 'Cole' : 'Nick'
               return (
                 <button
                   key={a}
