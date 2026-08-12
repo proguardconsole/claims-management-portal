@@ -28,6 +28,7 @@ type ClaimRow = {
   sf_collected: number
   ded_collected: number
   net_incurred: number
+  reassignment_needed: boolean
 }
 
 type DeniedRow = {
@@ -319,7 +320,20 @@ function ClaimTable({
             const dateVal = dateLabel === 'Close Date' ? r.close_date : r.created_time
             return (
               <tr key={r.id} style={{ background: bg }}>
-                <td style={{ ...TD_STYLE, fontWeight: 600 }}>{r.field_service_number ?? '—'}</td>
+                <td style={{ ...TD_STYLE, fontWeight: 600 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    {r.field_service_number ?? '—'}
+                    {r.owner_name === 'Shawn Zagryn' && r.reassignment_needed && (
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
+                        color: 'var(--accent-amber)', border: '1px solid var(--accent-amber)',
+                        borderRadius: 3, padding: '1px 5px', whiteSpace: 'nowrap',
+                      }}>
+                        REASSIGN
+                      </span>
+                    )}
+                  </span>
+                </td>
                 <td style={TD_STYLE}>{r.contact_name ?? '—'}</td>
                 <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.stage ?? '—'}</td>
                 <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.claim_trigger ?? '—'}</td>

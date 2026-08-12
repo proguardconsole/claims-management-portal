@@ -59,7 +59,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
        emergency, claim_denied, claim_denied_reason,
        total_claim_costs, total_amount_paid,
        contact_name, claim_contact_phone, account_name,
-       proceed_to_remediation, record_type, claim_trigger, description`,
+       proceed_to_remediation, record_type, claim_trigger, description,
+       reassignment_needed`,
     )
     .in('claim_status', [...OPEN_STATUSES, ...PENDING_PULL_STATUSES])
     .not('owner_name', 'ilike', '%admin%')

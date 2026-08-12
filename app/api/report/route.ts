@@ -10,7 +10,7 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24
 // Columns fetched for every claim record used in section assembly
 const CLAIM_COLS =
   'id, field_service_number, deal_name, stage, claim_status, tank_type, claim_trigger, ' +
-  'contact_name, city, claim_state, owner_name, created_time'
+  'contact_name, city, claim_state, owner_name, created_time, reassignment_needed'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,6 +74,7 @@ export type ClaimRow = {
   sf_collected:         number
   ded_collected:        number
   net_incurred:         number
+  reassignment_needed:  boolean
 }
 
 export type DeniedRow = {
@@ -268,6 +269,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       sf_collected:         pay.sf_collected,
       ded_collected:        pay.ded_collected,
       net_incurred:         pay.billing_value + est.adjuster_fees - pay.sf_collected - pay.ded_collected,
+      reassignment_needed:  (c.reassignment_needed as boolean | null) ?? false,
     }
   }
 

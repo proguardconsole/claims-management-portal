@@ -35,6 +35,7 @@ type Claim = {
   from_carrier: number | null
   received_to_date: number | null
   contractor_name: string | null
+  reassignment_needed: boolean | null
 }
 
 type ContractorRow = {
@@ -216,21 +217,38 @@ function ClaimRow({
             {claim.field_service_number ?? '—'}
           </span>
         </span>
-        {claim.emergency && (
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              color: 'var(--accent-red)',
-              border: '1px solid var(--accent-red)',
-              borderRadius: 3,
-              padding: '1px 5px',
-            }}
-          >
-            EMRG
-          </span>
-        )}
+        <span style={{ display: 'inline-flex', gap: 4 }}>
+          {claim.emergency && (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                color: 'var(--accent-red)',
+                border: '1px solid var(--accent-red)',
+                borderRadius: 3,
+                padding: '1px 5px',
+              }}
+            >
+              EMRG
+            </span>
+          )}
+          {claim.owner_name === 'Shawn Zagryn' && claim.reassignment_needed && (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                color: 'var(--accent-amber)',
+                border: '1px solid var(--accent-amber)',
+                borderRadius: 3,
+                padding: '1px 5px',
+              }}
+            >
+              REASSIGN
+            </span>
+          )}
+        </span>
       </div>
 
       {/* Row 2 — stage */}
