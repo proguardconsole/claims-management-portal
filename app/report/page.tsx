@@ -396,7 +396,7 @@ function ExclusionManager({
   onRefetch,
 }: {
   exclusions: Exclusion[]
-  onRefetch: () => void
+  onRefetch: () => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(false)
   const [newFsn, setNewFsn]     = useState('')
@@ -420,7 +420,9 @@ function ExclusionManager({
         return
       }
       setNewFsn('')
-      onRefetch()
+      const scrollY = window.scrollY
+      await onRefetch()
+      requestAnimationFrame(() => window.scrollTo(0, scrollY))
     } catch (e) {
       setErr(String(e))
     } finally {
@@ -430,8 +432,10 @@ function ExclusionManager({
 
   async function handleRemove(fsn: string) {
     try {
+      const scrollY = window.scrollY
       await fetch(`/api/internal/report-exclusions/${encodeURIComponent(fsn)}`, { method: 'DELETE' })
-      onRefetch()
+      await onRefetch()
+      requestAnimationFrame(() => window.scrollTo(0, scrollY))
     } catch { /* ignore */ }
   }
 
@@ -522,7 +526,7 @@ function ExclusionManager({
 
 // ─── manual denial form ───────────────────────────────────────────────────────
 
-function ManualDenialForm({ onRefetch }: { onRefetch: () => void }) {
+function ManualDenialForm({ onRefetch }: { onRefetch: () => Promise<void> }) {
   const [expanded, setExpanded] = useState(false)
   const [form, setForm] = useState({
     claim_reference: '',
@@ -554,7 +558,9 @@ function ManualDenialForm({ onRefetch }: { onRefetch: () => void }) {
       }
       setForm({ claim_reference: '', contact_name: '', trigger: '', tank_type: 'UST', denial_date: todayStr(), notes: '' })
       setExpanded(false)
-      onRefetch()
+      const scrollY = window.scrollY
+      await onRefetch()
+      requestAnimationFrame(() => window.scrollTo(0, scrollY))
     } catch (e) {
       setErr(String(e))
     } finally {
