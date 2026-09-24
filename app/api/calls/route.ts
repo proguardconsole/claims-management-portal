@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
+import { fetchAllRows } from '../../../lib/supabase/fetchAll'
+import { cronAuthOk } from '../../../lib/secureCompare'
 
 // ── constants ──────────────────────────────────────────────────────────────────
 
 const SEPTIC_BASE_URL = 'https://mtqawtilhjivmahbmaiz.supabase.co/rest/v1'
 
 const AGENT_COLE = 'Cole Anderson'
-const AGENT_SHAWN = 'Shawn C. Zagryn'
+const AGENT_NICK = 'Nick Alexander'
 
 const DEFAULT_DAYS = 30
 const MAX_DAYS = 90
@@ -88,9 +90,7 @@ function clampDays(raw: string | null): number {
 // ── route handler ──────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const authHeader = req.headers.get('Authorization')
-  const expected = `Bearer ${process.env.CRON_SECRET}`
-  if (!authHeader || authHeader !== expected) {
+  if (!cronAuthOk(req.headers.get('Authorization'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -104,7 +104,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const { searchParams } = req.nextUrl
   const daysParam  = searchParams.get('days')
-  const agentParam = searchParams.get('agent')   // 'cole' | 'shawn' | null
+  const agentParam = searchParams.get('agent')   // 'cole' | 'nick' | null
   const answeredParam = searchParams.get('answered') // 'true' | 'false' | null
 
   const days = clampDays(daysParam)
@@ -129,10 +129,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   if (agentParam === 'cole') {
     params.set('agent_name', `eq.${AGENT_COLE}`)
-  } else if (agentParam === 'shawn') {
-    params.set('agent_name', `eq.${AGENT_SHAWN}`)
+  } else if (agentParam === 'nick') {
+    params.set('agent_name', `eq.${AGENT_NICK}`)
   } else {
-    params.set('agent_name', `in.("${AGENT_COLE}","${AGENT_SHAWN}")`)
+    params.set('agent_name', `in.("${AGENT_COLE}","${AGENT_NICK}")`)
   }
 
   if (answeredParam === 'true')  params.set('answered', 'eq.true')
@@ -168,11 +168,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // ── STEP 2: fetch ProGuard claims for phone matching ──────────────────────
 
   const sb = getServerSupabase()
-  const { data: claimsData, error: claimsError } = await sb
+  const { data: claimsData, error: claimsError } = await fetchAllRows((f, t) => sb
     .from('claims')
     .select('id, field_service_number, claim_contact_phone, deal_name, owner_name, stage, tank_type')
     .not('claim_contact_phone', 'is', null)
     .neq('claim_contact_phone', '')
+    .order('id').range(f, t))
 
   if (claimsError) {
     return NextResponse.json(

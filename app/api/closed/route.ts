@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
+import { fetchAllRows } from '../../../lib/supabase/fetchAll'
+import { cronAuthOk } from '../../../lib/secureCompare'
 
 const CLOSED_STATUSES = ['ast_completed', 'ust_closed', 'ast_denied'] as const
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const authHeader = req.headers.get('Authorization')
-  const expected = `Bearer ${process.env.CRON_SECRET}`
-  if (!authHeader || authHeader !== expected) {
+  if (!cronAuthOk(req.headers.get('Authorization'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -15,12 +15,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   // Meta endpoint — returns distinct option lists for filter dropdowns
   if (p.get('meta') === '1') {
-    const { data: meta, error: metaErr } = await sb
+    const { data: meta, error: metaErr } = await fetchAllRows((f, t) => sb
       .from('claims')
       .select('owner_name, account_name, stage, claim_trigger')
       .eq('record_type', 'Claim')
       .in('claim_status', [...CLOSED_STATUSES])
       .not('owner_name', 'ilike', '%admin%')
+      .order('id').range(f, t))
     if (metaErr) return NextResponse.json({ error: metaErr.message }, { status: 500 })
     const ownersMap: Record<string, true>   = {}
     const dealersMap: Record<string, true>  = {}
@@ -112,7 +113,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ? sb.from('estimates').select('claim_id, estimate_total').in('claim_id', ids)
       : Promise.resolve({ data: [] as { claim_id: string; estimate_total: number | null }[] }),
     ids.length > 0
-      ? sb.from('claim_payments').select('claim_id, amount, incoming_or_outgoing, account_name').in('claim_id', ids)
+      ? fetchAllRows((f, t) => sb.from('claim_payments').select('claim_id, amount, incoming_or_outgoing, account_name').in('claim_id', ids).order('id').range(f, t))
       : Promise.resolve({ data: [] as { claim_id: string; amount: number | null; incoming_or_outgoing: string | null; account_name: string | null }[] }),
   ])
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cronAuthOk } from '../../../../lib/secureCompare'
 
 // ── system prompt ──────────────────────────────────────────────────────────────
 
@@ -22,7 +23,7 @@ Tone: Direct, factual, executive-level. No bullet points. No headers. No markdow
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const authHeader = req.headers.get('Authorization')
   const expected = `Bearer ${process.env.CRON_SECRET}`
-  if (!authHeader || authHeader !== expected) {
+  if (!cronAuthOk(authHeader)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
+import { fetchAllRows } from '../../../lib/supabase/fetchAll'
+import { cronAuthOk } from '../../../lib/secureCompare'
 
 // ── constants ──────────────────────────────────────────────────────────────────
 
@@ -50,15 +52,17 @@ type SB = ReturnType<typeof getServerSupabase>
 
 async function viewDwell(sb: SB, pipelineFilter?: string) {
   const [eventsRes, claimsRes] = await Promise.all([
-    sb
+    fetchAllRows((f, t) => sb
       .from('claim_events')
       .select('stage, days_in_stage, claim_id')
       .not('days_in_stage', 'is', null)
-      .not('stage', 'in', CLOSED_STAGES_TUPLE),
-    sb
+      .not('stage', 'in', CLOSED_STAGES_TUPLE)
+      .order('id').range(f, t)),
+    fetchAllRows((f, t) => sb
       .from('claims')
       .select('id, tank_type')
-      .not('owner_name', 'ilike', '%admin%'),
+      .not('owner_name', 'ilike', '%admin%')
+      .order('id').range(f, t)),
   ])
 
   if (eventsRes.error) throw new Error(eventsRes.error.message)
@@ -72,7 +76,9 @@ async function viewDwell(sb: SB, pipelineFilter?: string) {
   // Bucket raw days values by stage||pipeline key
   const agg: Record<string, number[]> = {}
   for (const ev of eventsRes.data ?? []) {
-    const pipeline = pipelineByClaimId[ev.claim_id] ?? 'Other'
+    // Drop events for claims outside the admin-filtered claims map
+    const pipeline = pipelineByClaimId[ev.claim_id]
+    if (!pipeline) continue
     if (pipelineFilter && pipeline !== pipelineFilter) continue
     const key = `${ev.stage ?? 'Unknown'}||${pipeline}`
     if (!agg[key]) agg[key] = []
@@ -105,27 +111,30 @@ async function viewVolume(sb: SB) {
 
   const [openedRes, closedEventsRes, claimsForPipelineRes] = await Promise.all([
     // Claims created in last 52 weeks (Claim type only)
-    sb
+    fetchAllRows((f, t) => sb
       .from('claims')
       .select('created_time, tank_type')
       .gte('created_time', cutoff)
       .eq('record_type', 'Claim')
       .not('owner_name', 'ilike', '%admin%')
-      .not('created_time', 'is', null),
+      .not('created_time', 'is', null)
+      .order('id').range(f, t)),
 
     // Terminal stage transitions in last 52 weeks
-    sb
+    fetchAllRows((f, t) => sb
       .from('claim_events')
       .select('entered_at, claim_id')
       .in('stage', CLOSED_STAGES_ARRAY)
       .gte('entered_at', cutoff)
-      .not('entered_at', 'is', null),
+      .not('entered_at', 'is', null)
+      .order('id').range(f, t)),
 
     // Full pipeline lookup for the closed-events join
-    sb
+    fetchAllRows((f, t) => sb
       .from('claims')
       .select('id, tank_type')
-      .not('owner_name', 'ilike', '%admin%'),
+      .not('owner_name', 'ilike', '%admin%')
+      .order('id').range(f, t)),
   ])
 
   if (openedRes.error) throw new Error(openedRes.error.message)
@@ -148,7 +157,9 @@ async function viewVolume(sb: SB) {
   // (a claim can have multiple terminal events; count it once per week)
   const closedAgg: Record<string, Record<string, true>> = {}
   for (const ev of closedEventsRes.data ?? []) {
-    const pipeline = pipelineByClaimId[ev.claim_id] ?? 'Other'
+    // Drop events for claims outside the admin-filtered claims map
+    const pipeline = pipelineByClaimId[ev.claim_id]
+    if (!pipeline) continue
     const key = `${isoWeek(ev.entered_at)}||${pipeline}`
     if (!closedAgg[key]) closedAgg[key] = {}
     closedAgg[key][ev.claim_id] = true
@@ -181,17 +192,19 @@ async function viewVolume(sb: SB) {
 
 async function viewBottleneck(sb: SB) {
   const [claimsRes, eventsRes] = await Promise.all([
-    sb
+    fetchAllRows((f, t) => sb
       .from('claims')
       .select('id, stage, tank_type, modified_time')
       .eq('record_type', 'Claim')
       .not('owner_name', 'ilike', '%admin%')
-      .not('stage', 'in', CLOSED_STAGES_TUPLE),
+      .not('stage', 'in', CLOSED_STAGES_TUPLE)
+      .order('id').range(f, t)),
     // Fetch all events — avoids long IN(...) param with 900+ claim IDs
-    sb
+    fetchAllRows((f, t) => sb
       .from('claim_events')
       .select('claim_id, stage, entered_at')
-      .not('entered_at', 'is', null),
+      .not('entered_at', 'is', null)
+      .order('id').range(f, t)),
   ])
 
   if (claimsRes.error) throw new Error(claimsRes.error.message)
@@ -247,13 +260,14 @@ type StaleBucket = '14-21d' | '21-30d' | '30-60d' | '60d+'
 const BUCKET_ORDER: StaleBucket[] = ['14-21d', '21-30d', '30-60d', '60d+']
 
 async function viewStale(sb: SB) {
-  const { data: openClaims, error } = await sb
+  const { data: openClaims, error } = await fetchAllRows((f, t) => sb
     .from('claims')
     .select('tank_type, modified_time')
     .eq('record_type', 'Claim')
     .not('owner_name', 'ilike', '%admin%')
     .not('stage', 'in', CLOSED_STAGES_TUPLE)
     .not('modified_time', 'is', null)
+    .order('id').range(f, t))
 
   if (error) throw new Error(error.message)
 
@@ -432,13 +446,14 @@ async function viewFinancial(sb: SB) {
 // Agent workload board: open claims per owner with staleness metrics.
 
 async function viewAgents(sb: SB) {
-  const { data: claims, error } = await sb
+  const { data: claims, error } = await fetchAllRows((f, t) => sb
     .from('claims')
     .select('owner_name, tank_type, modified_time')
     .eq('record_type', 'Claim')
     .not('stage', 'in', CLOSED_STAGES_TUPLE)
     .not('modified_time', 'is', null)
     .not('owner_name', 'ilike', '%admin%')
+    .order('id').range(f, t))
 
   if (error) throw new Error(error.message)
 
@@ -502,20 +517,22 @@ async function viewDenials(sb: SB) {
   cutoff.setMonth(cutoff.getMonth() - 18)
 
   const [closedRes, reasonsRes] = await Promise.all([
-    sb
+    fetchAllRows((f, t) => sb
       .from('claims')
       .select('stage, modified_time')
       .eq('record_type', 'Claim')
       .in('stage', CLOSED_STAGES_ARRAY)
       .gte('modified_time', cutoff.toISOString())
       .not('modified_time', 'is', null)
-      .not('owner_name', 'ilike', '%admin%'),
-    sb
+      .not('owner_name', 'ilike', '%admin%')
+      .order('id').range(f, t)),
+    fetchAllRows((f, t) => sb
       .from('claims')
       .select('claim_denied_reason')
       .eq('stage', 'Claim Denied')
       .not('owner_name', 'ilike', '%admin%')
-      .not('claim_denied_reason', 'is', null),
+      .not('claim_denied_reason', 'is', null)
+      .order('id').range(f, t)),
   ])
 
   if (closedRes.error) throw new Error(closedRes.error.message)
@@ -567,9 +584,7 @@ const VALID_VIEWS = [
 type View = (typeof VALID_VIEWS)[number]
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const authHeader = req.headers.get('Authorization')
-  const expected = `Bearer ${process.env.CRON_SECRET}`
-  if (!authHeader || authHeader !== expected) {
+  if (!cronAuthOk(req.headers.get('Authorization'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

@@ -130,6 +130,7 @@ function mapRecord(record: ZohoRecord, syncedAt: string) {
     claim_contact_phone: str(record.Claim_Contact_Phone),
     claim_contact_email: str(record.Claim_Contact_Email),
     date_claim_is_reported: str(record.Date_Claim_is_Reported),
+    claim_form_date: str(record.Claim_Form_Date),
     last_activity_time: str(record.Last_Activity_Time),
     created_time: str(record.Created_Time),
     modified_time: str(record.Modified_Time),
@@ -157,16 +158,25 @@ function mapRecord(record: ZohoRecord, syncedAt: string) {
 }
 
 async function loadStoredStages(): Promise<Map<string, StoredClaim>> {
-  const { data, error } = await getSupabase()
-    .from('claims')
-    .select('id, stage, field_service_number')
-  if (error) throw new Error(`Failed to load stored claim stages: ${error.message}`)
+  // PostgREST caps responses at 1,000 rows; the claims table is past that.
+  // Page with .range() until a short page — a partial map here makes the
+  // transition detector fire phantom events for every missing claim.
+  const PAGE = 1000
   const map = new Map<string, StoredClaim>()
-  for (const c of data ?? []) {
-    map.set(c.id as string, {
-      stage: c.stage as string | null,
-      field_service_number: c.field_service_number as string | null,
-    })
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await getSupabase()
+      .from('claims')
+      .select('id, stage, field_service_number')
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) throw new Error(`Failed to load stored claim stages: ${error.message}`)
+    for (const c of data ?? []) {
+      map.set(c.id as string, {
+        stage: c.stage as string | null,
+        field_service_number: c.field_service_number as string | null,
+      })
+    }
+    if ((data ?? []).length < PAGE) break
   }
   return map
 }

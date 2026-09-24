@@ -17,7 +17,10 @@ type ClaimRow = {
   city: string | null
   claim_state: string | null
   owner_name: string | null
+  account_name: string | null
+  street: string | null
   created_time: string | null
+  open_date: string | null
   close_date: string | null
   days_open: number
   aging: string
@@ -28,6 +31,7 @@ type ClaimRow = {
   sf_collected: number
   ded_collected: number
   net_incurred: number
+  reassignment_needed: boolean
 }
 
 type DeniedRow = {
@@ -223,6 +227,10 @@ function TotalsRow({ rows, label = 'TOTALS' }: { rows: ClaimRow[]; label?: strin
       <td style={BOLD_NUM}>{fmtDollar(estimate)}</td>
       <td style={BOLD} />
       <td style={BOLD} />
+      <td style={BOLD} />
+      <td style={BOLD} />
+      <td style={BOLD} />
+      <td style={BOLD} />
     </tr>
   )
 }
@@ -300,11 +308,11 @@ function ClaimTable({
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1200 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1650 }}>
         <thead>
           <tr>
             {['FS #', 'Contact', 'Stage', 'Trigger', 'Tank', dateLabel, 'Days', 'Aging',
-              'Adj Fees', 'Billing Value', 'SF Coll.', 'Ded Coll.', 'Net Incurred', 'Estimate', 'Contractor', 'Notes'
+              'Adj Fees', 'Billing Value', 'SF Coll.', 'Ded Coll.', 'Net Incurred', 'Estimate', 'Oil Dealer', 'Street', 'City', 'State', 'Contractor', 'Notes'
             ].map((h) => (
               <th key={h} style={{ ...TH_STYLE, textAlign: h === 'Days' || h === 'Adj Fees' || h === 'Billing Value' || h === 'SF Coll.' || h === 'Ded Coll.' || h === 'Net Incurred' || h === 'Estimate' ? 'right' : 'left' }}>
                 {h}
@@ -316,10 +324,23 @@ function ClaimTable({
           {rows.map((r, i) => {
             const bg = i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-elevated)'
             const daysColor = agingColor(r.aging)
-            const dateVal = dateLabel === 'Close Date' ? r.close_date : r.created_time
+            const dateVal = dateLabel === 'Close Date' ? r.close_date : r.open_date
             return (
               <tr key={r.id} style={{ background: bg }}>
-                <td style={{ ...TD_STYLE, fontWeight: 600 }}>{r.field_service_number ?? '—'}</td>
+                <td style={{ ...TD_STYLE, fontWeight: 600 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    {r.field_service_number ?? '—'}
+                    {r.owner_name === 'Shawn Zagryn' && r.reassignment_needed && (
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
+                        color: 'var(--accent-amber)', border: '1px solid var(--accent-amber)',
+                        borderRadius: 3, padding: '1px 5px', whiteSpace: 'nowrap',
+                      }}>
+                        REASSIGN
+                      </span>
+                    )}
+                  </span>
+                </td>
                 <td style={TD_STYLE}>{r.contact_name ?? '—'}</td>
                 <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.stage ?? '—'}</td>
                 <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.claim_trigger ?? '—'}</td>
@@ -335,6 +356,10 @@ function ClaimTable({
                   {fmtDollar(r.net_incurred)}
                 </td>
                 <td style={TD_NUM}>{fmtDollar(r.estimate_total)}</td>
+                <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.account_name ?? '—'}</td>
+                <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.street ?? '—'}</td>
+                <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.city ?? '—'}</td>
+                <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.claim_state ?? '—'}</td>
                 <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.contractor_name ?? '—'}</td>
                 <NotesCell claimId={r.id} notes={notes[r.id] ?? ''} onChange={onNoteChange} />
               </tr>
@@ -396,7 +421,7 @@ function ExclusionManager({
   onRefetch,
 }: {
   exclusions: Exclusion[]
-  onRefetch: () => void
+  onRefetch: () => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(false)
   const [newFsn, setNewFsn]     = useState('')
@@ -420,7 +445,9 @@ function ExclusionManager({
         return
       }
       setNewFsn('')
-      onRefetch()
+      const scrollY = window.scrollY
+      await onRefetch()
+      requestAnimationFrame(() => window.scrollTo(0, scrollY))
     } catch (e) {
       setErr(String(e))
     } finally {
@@ -430,8 +457,10 @@ function ExclusionManager({
 
   async function handleRemove(fsn: string) {
     try {
+      const scrollY = window.scrollY
       await fetch(`/api/internal/report-exclusions/${encodeURIComponent(fsn)}`, { method: 'DELETE' })
-      onRefetch()
+      await onRefetch()
+      requestAnimationFrame(() => window.scrollTo(0, scrollY))
     } catch { /* ignore */ }
   }
 
@@ -522,7 +551,7 @@ function ExclusionManager({
 
 // ─── manual denial form ───────────────────────────────────────────────────────
 
-function ManualDenialForm({ onRefetch }: { onRefetch: () => void }) {
+function ManualDenialForm({ onRefetch }: { onRefetch: () => Promise<void> }) {
   const [expanded, setExpanded] = useState(false)
   const [form, setForm] = useState({
     claim_reference: '',
@@ -554,7 +583,9 @@ function ManualDenialForm({ onRefetch }: { onRefetch: () => void }) {
       }
       setForm({ claim_reference: '', contact_name: '', trigger: '', tank_type: 'UST', denial_date: todayStr(), notes: '' })
       setExpanded(false)
-      onRefetch()
+      const scrollY = window.scrollY
+      await onRefetch()
+      requestAnimationFrame(() => window.scrollTo(0, scrollY))
     } catch (e) {
       setErr(String(e))
     } finally {

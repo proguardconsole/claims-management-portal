@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
+import { cronAuthOk } from '../../../lib/secureCompare'
 
 const OPEN_STATUSES = ['ast_open', 'ust_open'] as const
 const PENDING_PULL_STATUSES = ['ust_pre_tank'] as const
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const authHeader = req.headers.get('Authorization')
-  const expected = `Bearer ${process.env.CRON_SECRET}`
-  if (!authHeader || authHeader !== expected) {
+  if (!cronAuthOk(req.headers.get('Authorization'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -54,12 +53,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .from('claims')
     .select(
       `id, field_service_number, deal_name, stage, claim_status,
-       tank_type, owner_name, adjuster_name, city, claim_state,
+       tank_type, owner_name, adjuster_name, street, city, claim_state,
        date_claim_is_reported, modified_time, modified_by_name,
        emergency, claim_denied, claim_denied_reason,
        total_claim_costs, total_amount_paid,
        contact_name, claim_contact_phone, account_name,
-       proceed_to_remediation, record_type, claim_trigger, description`,
+       proceed_to_remediation, record_type, claim_trigger, description,
+       reassignment_needed`,
     )
     .in('claim_status', [...OPEN_STATUSES, ...PENDING_PULL_STATUSES])
     .not('owner_name', 'ilike', '%admin%')

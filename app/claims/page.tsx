@@ -1,9 +1,11 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { FileText, Phone, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react'
+import { FileText, Phone, ExternalLink, ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import AdvancedFilterBar, { type FilterState, DEFAULT_FILTERS } from '../../components/FilterBar'
+import TaskModal, { type Task } from '../../components/TaskModal'
+import { teamNameForEmail } from '../../lib/users'
 
 // ─── types ─────────────────────────────────────────────────────────────────────
 
@@ -16,6 +18,7 @@ type Claim = {
   tank_type: string | null
   owner_name: string | null
   adjuster_name: string | null
+  street: string | null
   city: string | null
   claim_state: string | null
   date_claim_is_reported: string | null
@@ -35,6 +38,7 @@ type Claim = {
   from_carrier: number | null
   received_to_date: number | null
   contractor_name: string | null
+  reassignment_needed: boolean | null
 }
 
 type ContractorRow = {
@@ -216,21 +220,38 @@ function ClaimRow({
             {claim.field_service_number ?? '—'}
           </span>
         </span>
-        {claim.emergency && (
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              color: 'var(--accent-red)',
-              border: '1px solid var(--accent-red)',
-              borderRadius: 3,
-              padding: '1px 5px',
-            }}
-          >
-            EMRG
-          </span>
-        )}
+        <span style={{ display: 'inline-flex', gap: 4 }}>
+          {claim.emergency && (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                color: 'var(--accent-red)',
+                border: '1px solid var(--accent-red)',
+                borderRadius: 3,
+                padding: '1px 5px',
+              }}
+            >
+              EMRG
+            </span>
+          )}
+          {claim.owner_name === 'Shawn Zagryn' && claim.reassignment_needed && (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                color: 'var(--accent-amber)',
+                border: '1px solid var(--accent-amber)',
+                borderRadius: 3,
+                padding: '1px 5px',
+              }}
+            >
+              REASSIGN
+            </span>
+          )}
+        </span>
       </div>
 
       {/* Row 2 — stage */}
@@ -418,6 +439,184 @@ function EmptyState() {
   )
 }
 
+// ─── related tasks section ─────────────────────────────────────────────────────
+
+const TASK_STATUS_META: Record<Task['status'], { label: string; accent: string }> = {
+  todo:        { label: 'Todo',        accent: 'var(--text-secondary)' },
+  in_progress: { label: 'In Progress', accent: 'var(--accent-yellow)' },
+  done:        { label: 'Done',        accent: 'var(--accent-green)' },
+}
+
+function fmtTaskDue(iso: string | null): string {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-').map(Number)
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${d} ${months[m - 1]} ${y}`
+}
+
+function RelatedTasks({ claim }: { claim: Claim }) {
+  const [tasks, setTasks]         = useState<Task[]>([])
+  const [loading, setLoading]     = useState(true)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
+
+  const fetchTasks = useCallback(() => {
+    fetch(`/api/internal/tasks?claim_id=${encodeURIComponent(claim.id)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`(${r.status})`))))
+      .then((data: Task[]) => setTasks(data))
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [claim.id])
+
+  useEffect(() => {
+    setLoading(true)
+    setTasks([])
+    fetchTasks()
+  }, [fetchTasks])
+
+  const fsn = claim.field_service_number
+
+  return (
+    <div
+      style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '14px 20px',
+        marginBottom: 14,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 10,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          Related Tasks{tasks.length > 0 ? ` (${tasks.length})` : ''}
+        </span>
+        <button
+          onClick={() => { setEditingTask(null); setModalOpen(true) }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            background: 'transparent',
+            border: '1px solid var(--border)',
+            borderRadius: 5,
+            padding: '4px 10px',
+            color: 'var(--text-secondary)',
+            fontSize: 11,
+            cursor: 'pointer',
+            transition: 'border-color 0.15s, color 0.15s',
+          }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.borderColor = 'var(--border-bright)'
+            e.currentTarget.style.color = 'var(--text-primary)'
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.borderColor = 'var(--border)'
+            e.currentTarget.style.color = 'var(--text-secondary)'
+          }}
+        >
+          <Plus size={12} />
+          Add task
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Loading...</div>
+      ) : tasks.length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>No tasks linked to this claim</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {tasks.map((t) => {
+            const meta = TASK_STATUS_META[t.status]
+            return (
+              <div
+                key={t.id}
+                onClick={() => { setEditingTask(t); setModalOpen(true) }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '7px 10px',
+                  background: 'var(--bg-base)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--bg-elevated)')}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--bg-base)')}
+              >
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    background: meta.accent,
+                    flexShrink: 0,
+                  }}
+                  title={meta.label}
+                />
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--text-primary)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    flex: 1,
+                    textDecoration: t.status === 'done' ? 'line-through' : 'none',
+                    opacity: t.status === 'done' ? 0.6 : 1,
+                  }}
+                >
+                  {t.title}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>
+                  {teamNameForEmail(t.assignee_email)}
+                </span>
+                {t.due_date && (
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>
+                    {fmtTaskDue(t.due_date)}
+                  </span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {modalOpen && (
+        <TaskModal
+          task={editingTask}
+          claims={[{
+            id: claim.id,
+            field_service_number: claim.field_service_number,
+            deal_name: claim.deal_name,
+            contact_name: claim.contact_name,
+          }]}
+          defaultClaimId={editingTask ? undefined : claim.id}
+          defaultTitle={editingTask ? undefined : (fsn ? `${fsn} — ` : '')}
+          onClose={() => setModalOpen(false)}
+          onSaved={fetchTasks}
+        />
+      )}
+    </div>
+  )
+}
+
 function ClaimDetail({
   claim,
   history,
@@ -543,6 +742,12 @@ function ClaimDetail({
 
             <InfoLabel>Trigger</InfoLabel>
             <InfoValue>{claim.claim_trigger ?? '—'}</InfoValue>
+
+            <InfoLabel>Street</InfoLabel>
+            <InfoValue>{claim.street ?? '—'}</InfoValue>
+
+            <InfoLabel>City</InfoLabel>
+            <InfoValue>{claim.city ?? '—'}</InfoValue>
 
             <InfoLabel>State</InfoLabel>
             <InfoValue>{claim.claim_state ?? '—'}</InfoValue>
@@ -755,6 +960,9 @@ function ClaimDetail({
           </div>
         )}
       </div>
+
+      {/* D2 — Related tasks */}
+      <RelatedTasks claim={claim} />
 
       {/* E — Call logs */}
       <div

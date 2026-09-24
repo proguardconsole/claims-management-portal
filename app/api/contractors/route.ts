@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
+import { cronAuthOk } from '../../../lib/secureCompare'
 
 // ── constants ──────────────────────────────────────────────────────────────────
 
@@ -33,9 +34,7 @@ type ContractorAgg = {
 // ── route ──────────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const authHeader = req.headers.get('Authorization')
-  const expected = `Bearer ${process.env.CRON_SECRET}`
-  if (!authHeader || authHeader !== expected) {
+  if (!cronAuthOk(req.headers.get('Authorization'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

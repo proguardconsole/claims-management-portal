@@ -13,6 +13,7 @@ import {
   Archive,
   FileBarChart,
   Info,
+  CheckSquare,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
   { label: 'Analytics',       href: '/analytics',    icon: TrendingUp      },
   { label: 'Inspections',     href: '/inspections',  icon: ClipboardCheck  },
   { label: 'Call Logs',       href: '/calls',         icon: Phone           },
+  { label: 'Tasks',           href: '/tasks',        icon: CheckSquare     },
   { label: 'Closed / Denied', href: '/closed',       icon: Archive         },
   { label: 'Weekly Digest',   href: '/digest',       icon: FileBarChart    },
   { label: 'Weekly Report',   href: '/report',       icon: ClipboardList   },
