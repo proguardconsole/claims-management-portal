@@ -1,49 +1,53 @@
-# claims-management-portal
+# ProGuard Claims Management Portal
 
-Internal portal for managing insurance claims workflows. Built with Next.js 14 (App Router), TypeScript, and Supabase.
+Internal dashboard for ProGuard's AST/UST claims operations: open-claims board,
+weekly report (web + Excel export), analytics, inspections, call logs, weekly
+digest, and a tasks/calendar board for the claims team. Data is synced daily
+from Zoho CRM into Supabase; the UI reads from Supabase only.
+
+**Production:** https://proguard-claims.vercel.app (Vercel project `proguard-claims` — the only deploy target).
 
 ## Stack
 
 | Layer | Choice |
 |---|---|
-| Framework | Next.js 14 (App Router) |
-| Language | TypeScript |
-| Database / Auth | Supabase (`@supabase/supabase-js`, `@supabase/ssr`) |
-| Telephony | 3CX (REST API) + Twilio |
-| CRM | Zoho |
+| Framework | Next.js 14 (App Router), TypeScript |
+| Database | Supabase Postgres (project `cxqzacvdcexcxhrssafl`), deny-all RLS; all access server-side via service role |
+| Auth | NextAuth v4 + Azure AD (Entra ID), 4-person allowlist in `lib/users.ts` / `lib/auth.ts` |
+| Data sources | Zoho CRM (claims, estimates, payments, inspections), 3CX (call logs), Septic GTM Supabase (phone calls) |
+| Sync | Daily Vercel Cron → `/api/sync` (10:00 UTC); manual trigger with `CRON_SECRET` bearer |
+| API pattern | Public `/api/*` routes (CRON_SECRET-gated) fronted by `/api/internal/*` BFF proxies for the browser |
 
-## Environment setup
+## Run locally
 
-1. Copy the example env file:
-   ```bash
-   cp .env.local.example .env.local
-   ```
+```bash
+npm install
+cp .env.local.example .env.local   # then fill in values — see comments in the file
+npm run dev
+```
 
-2. Fill in each variable:
+Sign-in requires an allowlisted Azure AD account. Every table has deny-all RLS,
+so a valid `SUPABASE_SERVICE_ROLE_KEY` is required for any data to load.
 
-   | Variable | Where to find it |
-   |---|---|
-   | `NEXT_PUBLIC_SUPABASE_URL` | Supabase dashboard → Project Settings → API |
-   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase dashboard → Project Settings → API |
-   | `ZOHO_CLIENT_ID` | Zoho API Console → your OAuth app |
-   | `ZOHO_CLIENT_SECRET` | Zoho API Console → your OAuth app |
-   | `ZOHO_REFRESH_TOKEN` | Generate via Zoho OAuth flow (offline_access scope) |
-   | `ZOHO_ORG_ID` | Zoho Desk → Settings → Developer Space → Org ID |
-   | `THREECX_API_BASE_URL` | Your 3CX admin panel → API settings |
-   | `THREECX_API_KEY` | Your 3CX admin panel → API settings |
-   | `TWILIO_ACCOUNT_SID` | Twilio Console → Account Info |
-   | `TWILIO_AUTH_TOKEN` | Twilio Console → Account Info |
+Type-check and build:
 
-3. Run the dev server:
-   ```bash
-   npm run dev
-   ```
+```bash
+npx tsc --noEmit
+npm run build
+```
 
-## Supabase client
+## Repository map
 
-Two exports from `lib/supabase.ts`:
+- `app/` — pages + API routes (`app/api/internal/*` are the browser-facing proxies)
+- `components/` — shared UI (nav, filter bar, task modal)
+- `lib/` — auth, Supabase clients (`lib/supabase/`), Zoho/3CX clients, sync modules (`lib/sync/`)
+- `supabase/migrations/` — schema migrations, applied with `supabase db push` (do not move this folder)
+- `scripts/` — ad-hoc sync/test scripts; see `scripts/README.md`
+- `docs/` — handover, architecture, runbooks, decision records
 
-| Export | Use in |
-|---|---|
-| `createClient()` | Client Components |
-| `createServerSupabaseClient()` | Server Components, Route Handlers, Server Actions |
+## Documentation
+
+Start with `docs/handover/` (repo inventory and handover manual) and `CLAUDE.md`
+at the repo root (operating manual for AI-assisted maintenance) once supplied.
+No secrets belong in this repo — environment variable names live in
+`.env.local.example`, values only in `.env.local` and Vercel.
