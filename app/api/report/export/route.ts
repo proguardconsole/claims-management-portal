@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { GET as reportGET } from '../route'
 import type { ClaimRow, DeniedRow } from '../route'
+import { cronAuthOk } from '../../../../lib/secureCompare'
 
 export const runtime = 'nodejs'
 
 // ─── auth ─────────────────────────────────────────────────────────────────────
 
 function authOk(req: NextRequest): boolean {
-  return req.headers.get('Authorization') === `Bearer ${process.env.CRON_SECRET}`
+  return cronAuthOk(req.headers.get('Authorization'))
 }
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -93,9 +94,13 @@ function setColWidths(ws: ExcelJS.Worksheet): void {
     { width: 12 }, // L  Ded Collected
     { width: 12 }, // M  Net Incurred
     { width: 12 }, // N  Estimate
-    { width: 24 }, // O  Contractor
-    { width: 30 }, // P  Notes
-    { width: 14 }, // Q  Status (closed section only)
+    { width: 24 }, // O  Oil Dealer
+    { width: 26 }, // P  Street
+    { width: 16 }, // Q  City
+    { width: 7  }, // R  State
+    { width: 24 }, // S  Contractor
+    { width: 30 }, // T  Notes
+    { width: 14 }, // U  Status (closed section only)
   ]
 }
 
@@ -176,13 +181,15 @@ function addColHdrs(ws: ExcelJS.Worksheet, hdrs: string[]): void {
 const OPEN_HDRS = [
   'FS #', 'Contact Name', 'Stage', 'Trigger', 'Tank', 'Open Date',
   'Days Open', 'Aging', 'Adj Fees', 'Billing Value', 'SF Collected',
-  'Ded Collected', 'Net Incurred', 'Estimate', 'Contractor', 'Notes',
+  'Ded Collected', 'Net Incurred', 'Estimate', 'Oil Dealer', 'Street',
+  'City', 'State', 'Contractor', 'Notes',
 ]
 
 const CLOSED_HDRS = [
   'FS #', 'Contact Name', 'Stage', 'Trigger', 'Tank', 'Close Date',
   'Days Open', 'Aging', 'Adj Fees', 'Billing Value', 'SF Collected',
-  'Ded Collected', 'Net Incurred', 'Estimate', 'Contractor', 'Notes', 'Status',
+  'Ded Collected', 'Net Incurred', 'Estimate', 'Oil Dealer', 'Street',
+  'City', 'State', 'Contractor', 'Notes', 'Status',
 ]
 
 const DENIED_HDRS = ['FS #', 'Contact Name', 'Stage', 'Trigger', 'Tank', 'Close Date']
@@ -204,6 +211,10 @@ function addClaimDataRow(ws: ExcelJS.Worksheet, r: ClaimRow, isClose = false): v
     fin(r.ded_collected),
     fin(r.net_incurred),
     fin(r.estimate_total),
+    r.account_name,
+    r.street,
+    r.city,
+    r.claim_state,
     r.contractor_name,
     null, // Notes — blank in export
   ]
@@ -260,7 +271,7 @@ function addClaimsSection(
   totalsLabel: string,
   isClose = false,
 ): void {
-  const numCols = isClose ? 17 : 16
+  const numCols = isClose ? 21 : 20
   addSectionHdr(ws, title, numCols)
   addColHdrs(ws, isClose ? CLOSED_HDRS : OPEN_HDRS)
 
@@ -310,8 +321,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const report = (await reportRes.json()) as ReportJson
   const { as_of, week_start, week_end, kpis } = report
 
-  // Widest section is closed (17 cols); use that as the sheet's max column count
-  const MAX_COLS = 17
+  // Widest section is closed (21 cols); use that as the sheet's max column count
+  const MAX_COLS = 21
 
   const wb = new ExcelJS.Workbook()
   wb.creator         = 'ProGuard Claims Portal'

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
+import { fetchAllRows } from '../../../lib/supabase/fetchAll'
+import { cronAuthOk } from '../../../lib/secureCompare'
 
 // ── constants ──────────────────────────────────────────────────────────────────
 
@@ -32,9 +34,7 @@ function round1(n: number): number {
 // ── route ──────────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const authHeader = req.headers.get('Authorization')
-  const expected = `Bearer ${process.env.CRON_SECRET}`
-  if (!authHeader || authHeader !== expected) {
+  if (!cronAuthOk(req.headers.get('Authorization'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -62,13 +62,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .not('modified_time', 'is', null),
 
     // Terminal stage transitions within the period — drives closed/denied/avgDaysToClose
-    sb
+    fetchAllRows((f, t) => sb
       .from('claim_events')
       .select('claim_id, stage, entered_at')
       .in('stage', [...TERMINAL_STAGES])
       .gte('entered_at', since)
       .not('claim_id', 'is', null)
-      .not('entered_at', 'is', null),
+      .not('entered_at', 'is', null)
+      .order('id').range(f, t)),
 
     // Claims created within the period
     sb
@@ -79,16 +80,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .gte('created_time', since),
 
     // Historical stage dwell times — drives bottleneck section
-    sb
+    fetchAllRows((f, t) => sb
       .from('claim_events')
       .select('stage, days_in_stage')
-      .gt('days_in_stage', 0),
+      .gt('days_in_stage', 0)
+      .order('id').range(f, t)),
 
     // All estimates — drives byValue breakdown (filtered to open claim IDs in JS)
-    sb
+    fetchAllRows((f, t) => sb
       .from('estimates')
       .select('claim_id, estimate_total')
-      .not('claim_id', 'is', null),
+      .not('claim_id', 'is', null)
+      .order('id').range(f, t)),
 
     // Clean vs Dirty Pull — UST pull decisions within the selected period
     sb
@@ -97,14 +100,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .eq('tank_type', 'UST')
       .not('proceed_to_remediation', 'is', null)
       .not('stage', 'in', '("Needs Analysis","Service Fee Billed")')
+      .not('owner_name', 'ilike', '%admin%')
       .gte('created_time', since),
 
     // Net Flow — claim payments within the selected period
-    sb
+    fetchAllRows((f, t) => sb
       .from('claim_payments')
       .select('amount, payment_type, incoming_or_outgoing, account_name, related_type')
       .not('claim_id', 'is', null)
-      .gte('payment_date', since),
+      .gte('payment_date', since)
+      .order('id').range(f, t)),
   ])
 
   if (openClaimsRes.error) {
@@ -158,20 +163,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .map((e) => e.claim_id as string),
   )
 
-  const closedThisPeriod  = closedClaimIds.size
-  const deniedThisPeriod  = deniedClaimIds.size
   const openedThisPeriod  = openedCountRes.count ?? 0
 
-  // ── avgDaysToClose: wave 2 if there are closed claims ────────────────────────
+  // ── avgDaysToClose + admin-filtered closed/denied counts: wave 2 ────────────
+  // Terminal events don't carry owner_name, so counts must go through the
+  // claims table to exclude admin-owned records.
 
   let avgDaysToClose = 0
+  let closedThisPeriod = 0
+  let deniedThisPeriod = 0
 
   if (closedClaimIds.size > 0) {
     const { data: closedClaimsData } = await sb
       .from('claims')
       .select('id, created_time')
       .in('id', Array.from(closedClaimIds))
-      .not('created_time', 'is', null)
+      .not('owner_name', 'ilike', '%admin%')
+
+    const nonAdminIds = new Set((closedClaimsData ?? []).map((c) => c.id as string))
+    closedThisPeriod = nonAdminIds.size
+    deniedThisPeriod = Array.from(deniedClaimIds).filter((id) => nonAdminIds.has(id)).length
 
     const createdAtById: Record<string, string> = {}
     for (const c of closedClaimsData ?? []) {

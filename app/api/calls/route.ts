@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
+import { fetchAllRows } from '../../../lib/supabase/fetchAll'
+import { cronAuthOk } from '../../../lib/secureCompare'
 
 // ── constants ──────────────────────────────────────────────────────────────────
 
@@ -88,9 +90,7 @@ function clampDays(raw: string | null): number {
 // ── route handler ──────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const authHeader = req.headers.get('Authorization')
-  const expected = `Bearer ${process.env.CRON_SECRET}`
-  if (!authHeader || authHeader !== expected) {
+  if (!cronAuthOk(req.headers.get('Authorization'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -168,11 +168,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // ── STEP 2: fetch ProGuard claims for phone matching ──────────────────────
 
   const sb = getServerSupabase()
-  const { data: claimsData, error: claimsError } = await sb
+  const { data: claimsData, error: claimsError } = await fetchAllRows((f, t) => sb
     .from('claims')
     .select('id, field_service_number, claim_contact_phone, deal_name, owner_name, stage, tank_type')
     .not('claim_contact_phone', 'is', null)
     .neq('claim_contact_phone', '')
+    .order('id').range(f, t))
 
   if (claimsError) {
     return NextResponse.json(

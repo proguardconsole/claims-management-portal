@@ -17,7 +17,10 @@ type ClaimRow = {
   city: string | null
   claim_state: string | null
   owner_name: string | null
+  account_name: string | null
+  street: string | null
   created_time: string | null
+  open_date: string | null
   close_date: string | null
   days_open: number
   aging: string
@@ -224,6 +227,10 @@ function TotalsRow({ rows, label = 'TOTALS' }: { rows: ClaimRow[]; label?: strin
       <td style={BOLD_NUM}>{fmtDollar(estimate)}</td>
       <td style={BOLD} />
       <td style={BOLD} />
+      <td style={BOLD} />
+      <td style={BOLD} />
+      <td style={BOLD} />
+      <td style={BOLD} />
     </tr>
   )
 }
@@ -301,11 +308,11 @@ function ClaimTable({
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1200 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1650 }}>
         <thead>
           <tr>
             {['FS #', 'Contact', 'Stage', 'Trigger', 'Tank', dateLabel, 'Days', 'Aging',
-              'Adj Fees', 'Billing Value', 'SF Coll.', 'Ded Coll.', 'Net Incurred', 'Estimate', 'Contractor', 'Notes'
+              'Adj Fees', 'Billing Value', 'SF Coll.', 'Ded Coll.', 'Net Incurred', 'Estimate', 'Oil Dealer', 'Street', 'City', 'State', 'Contractor', 'Notes'
             ].map((h) => (
               <th key={h} style={{ ...TH_STYLE, textAlign: h === 'Days' || h === 'Adj Fees' || h === 'Billing Value' || h === 'SF Coll.' || h === 'Ded Coll.' || h === 'Net Incurred' || h === 'Estimate' ? 'right' : 'left' }}>
                 {h}
@@ -317,7 +324,7 @@ function ClaimTable({
           {rows.map((r, i) => {
             const bg = i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-elevated)'
             const daysColor = agingColor(r.aging)
-            const dateVal = dateLabel === 'Close Date' ? r.close_date : r.created_time
+            const dateVal = dateLabel === 'Close Date' ? r.close_date : r.open_date
             return (
               <tr key={r.id} style={{ background: bg }}>
                 <td style={{ ...TD_STYLE, fontWeight: 600 }}>
@@ -349,6 +356,10 @@ function ClaimTable({
                   {fmtDollar(r.net_incurred)}
                 </td>
                 <td style={TD_NUM}>{fmtDollar(r.estimate_total)}</td>
+                <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.account_name ?? '—'}</td>
+                <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.street ?? '—'}</td>
+                <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.city ?? '—'}</td>
+                <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.claim_state ?? '—'}</td>
                 <td style={{ ...TD_STYLE, color: 'var(--text-secondary)' }}>{r.contractor_name ?? '—'}</td>
                 <NotesCell claimId={r.id} notes={notes[r.id] ?? ''} onChange={onNoteChange} />
               </tr>

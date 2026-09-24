@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
+import { fetchAllRows } from '../../../lib/supabase/fetchAll'
+import { cronAuthOk } from '../../../lib/secureCompare'
 
 // ── constants ──────────────────────────────────────────────────────────────────
 
@@ -65,9 +67,7 @@ type SB = ReturnType<typeof getServerSupabase>
 // ── route handler ──────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const authHeader = req.headers.get('Authorization')
-  const expected = `Bearer ${process.env.CRON_SECRET}`
-  if (!authHeader || authHeader !== expected) {
+  if (!cronAuthOk(req.headers.get('Authorization'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -109,13 +109,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       lastSyncedRes,
     ] = await Promise.all([
       // 1. Open claims — full payload for attention, agents, snapshot, bottleneck
-      sb
+      fetchAllRows((f, t) => sb
         .from('claims')
         .select('id, field_service_number, deal_name, owner_name, stage, modified_time, tank_type, emergency')
         .eq('record_type', 'Claim')
         .not('stage', 'in', CLOSED_STAGES_TUPLE)
         .not('modified_time', 'is', null)
-        .not('owner_name', 'ilike', '%admin%'),
+        .not('owner_name', 'ilike', '%admin%')
+        .order('id').range(f, t)),
 
       // 2. Opened previous period
       sb
@@ -127,24 +128,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .lt('created_time', start.toISOString()),
 
       // 4. All claims — pipeline lookup for financial and closed-event joins
-      sb
+      fetchAllRows((f, t) => sb
         .from('claims')
         .select('id, tank_type')
-        .not('owner_name', 'ilike', '%admin%'),
+        .not('owner_name', 'ilike', '%admin%')
+        .order('id').range(f, t)),
 
       // 5. Closed events this period + prev period (split in JS at start)
-      sb
+      fetchAllRows((f, t) => sb
         .from('claim_events')
         .select('claim_id, entered_at')
         .in('stage', CLOSED_STAGES_ARRAY)
         .gte('entered_at', prevStart.toISOString())
-        .not('entered_at', 'is', null),
+        .not('entered_at', 'is', null)
+        .order('id').range(f, t)),
 
       // 6. All events — for bottleneck stage-entered lookup
-      sb
+      fetchAllRows((f, t) => sb
         .from('claim_events')
         .select('claim_id, stage, entered_at')
-        .not('entered_at', 'is', null),
+        .not('entered_at', 'is', null)
+        .order('id').range(f, t)),
 
       // 6. Estimates — scoped to claims opened this period
       periodClaimIds.length > 0
@@ -155,29 +159,32 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         : Promise.resolve({ data: [] as { claim_id: string | null; estimate_total: number | null; contractor_costs: number | null; state_fees: number | null; adjuster_fees: number | null }[], error: null }),
 
       // 7. Payments — scoped to the selected period
-      sb
+      fetchAllRows((f, t) => sb
         .from('claim_payments')
         .select('claim_id, amount, incoming_or_outgoing, account_name')
         .not('claim_id', 'is', null)
-        .gte('payment_date', start.toISOString()),
+        .gte('payment_date', start.toISOString())
+        .order('id').range(f, t)),
 
       // 9. YTD closed claims — denial rate + denied this period
-      sb
+      fetchAllRows((f, t) => sb
         .from('claims')
         .select('stage, modified_time')
         .eq('record_type', 'Claim')
         .in('stage', CLOSED_STAGES_ARRAY)
         .not('owner_name', 'ilike', '%admin%')
         .gte('modified_time', yearStart.toISOString())
-        .not('modified_time', 'is', null),
+        .not('modified_time', 'is', null)
+        .order('id').range(f, t)),
 
       // 10. Denial reasons (all-time)
-      sb
+      fetchAllRows((f, t) => sb
         .from('claims')
         .select('claim_denied_reason')
         .eq('stage', 'Claim Denied')
         .not('owner_name', 'ilike', '%admin%')
-        .not('claim_denied_reason', 'is', null),
+        .not('claim_denied_reason', 'is', null)
+        .order('id').range(f, t)),
 
       // 11. Last synced — MAX(modified_time) proxy
       sb
@@ -354,9 +361,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const ustClosedThisPeriodSet: Record<string, true> = {}
 
     for (const ev of closedEventsRes.data ?? []) {
+      // Drop events for claims outside the admin-filtered claims map
+      const pl = pipelineByClaimId[ev.claim_id as string]
+      if (!pl) continue
       if ((ev.entered_at as string) >= startISO) {
         closedThisPeriodSet[ev.claim_id as string] = true
-        const pl = pipelineByClaimId[ev.claim_id as string]
         if (pl === 'AST') astClosedThisPeriodSet[ev.claim_id as string] = true
         if (pl === 'UST') ustClosedThisPeriodSet[ev.claim_id as string] = true
       } else {
@@ -446,7 +455,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const totalPaidToDate  = Object.values(pmtByPipeline).reduce((s, n) => s + n.paid_to_date, 0)
     const totalFromCarrier = Object.values(pmtByPipeline).reduce((s, n) => s + n.from_carrier, 0)
     const totalReceived    = Object.values(pmtByPipeline).reduce((s, n) => s + n.received_to_date, 0)
-    const collectionRate   = totalEstimated > 0 ? round1((totalReceived / totalEstimated) * 100) : 0
+
+    // Collection rate — same-cohort ratio. totalEstimated covers only claims
+    // OPENED this period, so the numerator must too; totalReceived (all period
+    // cashflow, any claim) stays as-is for the paid/received stats above.
+    const periodIdSet = new Set(periodClaimIds)
+    const receivedPeriodCohort = (paymentsRes.data ?? [])
+      .filter((p) => p.incoming_or_outgoing === 'Incoming' && p.claim_id && periodIdSet.has(p.claim_id as string))
+      .reduce((s, p) => s + ((p.amount as number) ?? 0), 0)
+    const collectionRate = totalEstimated > 0 ? round1((receivedPeriodCohort / totalEstimated) * 100) : 0
 
     const contractorCosts = Object.values(estByPipeline).reduce((s, e) => s + e.total_contractor_costs, 0)
     const stateFees       = Object.values(estByPipeline).reduce((s, e) => s + e.total_state_fees, 0)

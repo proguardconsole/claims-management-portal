@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
+import { fetchAllRows } from '../../../lib/supabase/fetchAll'
+import { cronAuthOk } from '../../../lib/secureCompare'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,12 +12,13 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24
 // Columns fetched for every claim record used in section assembly
 const CLAIM_COLS =
   'id, field_service_number, deal_name, stage, claim_status, tank_type, claim_trigger, ' +
-  'contact_name, city, claim_state, owner_name, created_time, reassignment_needed'
+  'contact_name, city, claim_state, owner_name, account_name, contractor_name, street, ' +
+  'created_time, date_claim_is_reported, claim_form_date, reassignment_needed'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 function authOk(req: NextRequest): boolean {
-  return req.headers.get('Authorization') === `Bearer ${process.env.CRON_SECRET}`
+  return cronAuthOk(req.headers.get('Authorization'))
 }
 
 function daysBetween(fromIso: string | null, toIso: string): number {
@@ -40,15 +43,14 @@ function emptyFetch(): Promise<{ data: R[] | null; error: null }> {
 type R = Record<string, unknown>
 
 type EstSummary = {
-  estimate_total:  number
-  adjuster_fees:   number
-  contractor_name: string | null
+  estimate_total: number
 }
 
 type PaySummary = {
-  billing_value: number
-  sf_collected:  number
-  ded_collected: number
+  billing_value:    number
+  sf_collected:     number
+  ded_collected:    number
+  carrier_adj_fees: number
 }
 
 export type ClaimRow = {
@@ -63,7 +65,10 @@ export type ClaimRow = {
   city:                 string | null
   claim_state:          string | null
   owner_name:           string | null
+  account_name:         string | null
+  street:               string | null
   created_time:         string | null
+  open_date:            string | null
   close_date:           string | null
   days_open:            number
   aging:                string
@@ -143,10 +148,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .gte('denial_date', weekStart)
         .lte('denial_date', asOf),
 
-      sb
+      fetchAllRows((f, t) => sb
         .from('pending_pull_snapshots')
         .select('field_service_number')
-        .lt('snapshot_date', weekStart),
+        .lt('snapshot_date', weekStart)
+        .order('id').range(f, t)),
     ])
 
   if (openRes.error)          return NextResponse.json({ error: `open: ${openRes.error.message}` },              { status: 500 })
@@ -189,19 +195,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const [termClaimsRes, { data: estData }, { data: payData }] = await Promise.all([
     terminalIds.length > 0
       ? sb.from('claims').select(`${CLAIM_COLS}, claim_denied`).in('id', terminalIds)
+          .not('owner_name', 'ilike', '%admin%')
+          .neq('record_type', 'Inspection')
       : emptyFetch(),
 
     allIds.length > 0
       ? sb
           .from('estimates')
-          .select('claim_id, adjuster_fees, estimate_total, contractor_name')
+          .select('claim_id, estimate_total')
           .in('claim_id', allIds)
       : emptyFetch(),
 
     allIds.length > 0
       ? sb
           .from('claim_payments')
-          .select('claim_id, amount, payment_type, incoming_or_outgoing')
+          .select('claim_id, amount, payment_type, incoming_or_outgoing, account_name')
           .in('claim_id', allIds)
       : emptyFetch(),
   ])
@@ -210,42 +218,46 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: `termClaims: ${termClaimsRes.error.message}` }, { status: 500 })
   }
 
-  // Build estimate map: claim_id → MAX(estimate_total), SUM(adjuster_fees)
+  // Build estimate map: claim_id → MAX(estimate_total)
   const estMap: Record<string, EstSummary> = {}
   for (const e of estData ?? []) {
     const r   = e as R
     const cid = r.claim_id as string | null
     if (!cid) continue
-    const et  = (r.estimate_total  as number | null) ?? 0
-    const af  = (r.adjuster_fees   as number | null) ?? 0
-    const cn  = (r.contractor_name as string | null)
+    const et  = (r.estimate_total as number | null) ?? 0
     const prev = estMap[cid]
     estMap[cid] = prev
-      ? { estimate_total: Math.max(prev.estimate_total, et), adjuster_fees: prev.adjuster_fees + af, contractor_name: prev.contractor_name ?? cn }
-      : { estimate_total: et, adjuster_fees: af, contractor_name: cn }
+      ? { estimate_total: Math.max(prev.estimate_total, et) }
+      : { estimate_total: et }
   }
 
-  // Build payment map: claim_id → billing_value / sf_collected / ded_collected
+  // Build payment map: claim_id → billing_value / sf_collected / ded_collected / carrier_adj_fees
   // billing_value = ALL outgoing Claim Payout rows (per Excel spec — includes Claim Adjusters)
+  // carrier_adj_fees = Outgoing rows for 'Claim Adjusters - Recoverable from Carrier'
   const payMap: Record<string, PaySummary> = {}
   for (const p of payData ?? []) {
     const r   = p as unknown as R
     const cid = r.claim_id as string | null
     if (!cid) continue
-    if (!payMap[cid]) payMap[cid] = { billing_value: 0, sf_collected: 0, ded_collected: 0 }
+    if (!payMap[cid]) payMap[cid] = { billing_value: 0, sf_collected: 0, ded_collected: 0, carrier_adj_fees: 0 }
     const amt = (r.amount as number | null) ?? 0
     if (r.payment_type === 'Claim Payout' && r.incoming_or_outgoing === 'Outgoing') payMap[cid].billing_value += amt
     if (r.payment_type === 'Service Fee'  && r.incoming_or_outgoing === 'Incoming') payMap[cid].sf_collected  += amt
     if (r.payment_type === 'Deductible'   && r.incoming_or_outgoing === 'Incoming') payMap[cid].ded_collected += amt
+    if (r.account_name === 'Claim Adjusters - Recoverable from Carrier' && r.incoming_or_outgoing === 'Outgoing') payMap[cid].carrier_adj_fees += amt
   }
 
   // ── Row builder ───────────────────────────────────────────────────────────
 
   function buildRow(c: R, refDateIso: string, closeDate: string | null = null): ClaimRow {
-    const cid      = c.id as string
-    const est      = estMap[cid] ?? { estimate_total: 0, adjuster_fees: 0, contractor_name: null }
-    const pay      = payMap[cid] ?? { billing_value: 0, sf_collected: 0, ded_collected: 0 }
-    const daysOpen = daysBetween(c.created_time as string | null, closeDate ?? refDateIso)
+    const cid = c.id as string
+    const est = estMap[cid] ?? { estimate_total: 0 }
+    const pay = payMap[cid] ?? { billing_value: 0, sf_collected: 0, ded_collected: 0, carrier_adj_fees: 0 }
+    // AST open: use date_claim_is_reported; UST/other: use claim_form_date, fallback created_time
+    const openDateIso = (c.claim_status === 'ast_open')
+      ? ((c.date_claim_is_reported as string | null) ?? (c.created_time as string | null))
+      : ((c.claim_form_date        as string | null) ?? (c.created_time as string | null))
+    const daysOpen = daysBetween(openDateIso, closeDate ?? refDateIso)
     return {
       id:                   cid,
       field_service_number: (c.field_service_number as string | null) ?? null,
@@ -258,18 +270,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       city:                 (c.city                 as string | null) ?? null,
       claim_state:          (c.claim_state          as string | null) ?? null,
       owner_name:           (c.owner_name           as string | null) ?? null,
+      account_name:         (c.account_name         as string | null) ?? null,
+      street:               (c.street               as string | null) ?? null,
       created_time:         (c.created_time         as string | null) ?? null,
+      open_date:            openDateIso,
       close_date:           closeDate,
       days_open:            daysOpen,
       aging:                agingBucket(daysOpen),
       estimate_total:       est.estimate_total,
-      adjuster_fees:        est.adjuster_fees,
-      contractor_name:      est.contractor_name,
+      adjuster_fees:        pay.carrier_adj_fees,
+      contractor_name:      (c.contractor_name      as string | null) ?? null,
       billing_value:        pay.billing_value,
       sf_collected:         pay.sf_collected,
       ded_collected:        pay.ded_collected,
-      net_incurred:         pay.billing_value + est.adjuster_fees - pay.sf_collected - pay.ded_collected,
-      reassignment_needed:  (c.reassignment_needed as boolean | null) ?? false,
+      net_incurred:         pay.billing_value + pay.carrier_adj_fees - pay.sf_collected - pay.ded_collected,
+      reassignment_needed:  (c.reassignment_needed  as boolean | null) ?? false,
     }
   }
 

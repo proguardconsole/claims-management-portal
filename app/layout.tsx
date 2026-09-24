@@ -4,7 +4,10 @@ import './globals.css'
 import NavBar from '../components/NavBar'
 import Sidebar from '../components/Sidebar'
 import AutoRefresh from '../components/AutoRefresh'
+import AuthSessionProvider from '../components/AuthSessionProvider'
 import { getServerSupabase } from '../lib/supabase/server'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '../lib/auth'
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
@@ -43,11 +46,15 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode
 }) {
-  const lastSynced = await getLastSynced()
+  const [lastSynced, session] = await Promise.all([
+    getLastSynced(),
+    getServerSession(authOptions),
+  ])
 
   return (
     <html lang="en">
       <body className={dmSans.className}>
+        <AuthSessionProvider session={session}>
         <NavBar />
         <Sidebar lastSynced={lastSynced} />
 
@@ -65,6 +72,7 @@ export default async function RootLayout({
         </main>
 
         <AutoRefresh />
+        </AuthSessionProvider>
       </body>
     </html>
   )

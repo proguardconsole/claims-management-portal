@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../../lib/supabase/server'
+import { cronAuthOk } from '../../../../lib/secureCompare'
 
 function authOk(req: NextRequest): boolean {
-  return req.headers.get('Authorization') === `Bearer ${process.env.CRON_SECRET}`
+  return cronAuthOk(req.headers.get('Authorization'))
 }
 
 export async function DELETE(

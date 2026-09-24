@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
+import { cronAuthOk } from '../../../lib/secureCompare'
 
 // ── constants ──────────────────────────────────────────────────────────────────
 
@@ -12,7 +13,7 @@ const PENDING_PULL_STATUSES = ['ust_pre_tank'] as const
 // ── helpers ────────────────────────────────────────────────────────────────────
 
 function authOk(req: NextRequest): boolean {
-  return req.headers.get('Authorization') === `Bearer ${process.env.CRON_SECRET}`
+  return cronAuthOk(req.headers.get('Authorization'))
 }
 
 // ── GET — individual stale claim records ───────────────────────────────────────

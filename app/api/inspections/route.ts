@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '../../../lib/supabase/server'
+import { cronAuthOk } from '../../../lib/secureCompare'
 
 const PAGE_LIMIT = 100
 const META_BATCH = 1000
@@ -12,9 +13,7 @@ const SORT_MAP: Record<string, { col: string; asc: boolean }> = {
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const authHeader = req.headers.get('Authorization')
-  const expected = `Bearer ${process.env.CRON_SECRET}`
-  if (!authHeader || authHeader !== expected) {
+  if (!cronAuthOk(req.headers.get('Authorization'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
