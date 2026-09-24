@@ -37,3 +37,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 supabase/.temp/
+
+# local Claude Code launch config (holds dev-only literals)
+.claude/launch.json
