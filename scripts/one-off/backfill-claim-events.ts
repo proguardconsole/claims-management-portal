@@ -1,3 +1,5 @@
+// ONE-OFF. Has unbounded selects. Do not re-run without adding pagination.
+//
 // One-off backfill: claim_events gap Jul 21 – Aug 6 2026
 //
 // syncStageHistory silently timed out on Vercel; 34 claims reached terminal stages
